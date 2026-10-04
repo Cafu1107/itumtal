@@ -1,6 +1,6 @@
 import {
   api, $, $$, esc, icon, fmtDate, fmtPhone, MONTHS, DAYS_SHORT, parseISO, toISO, isoWeekday,
-  toast, setLoading, copyText, showFieldErrors, saveApplication,
+  toast, setLoading, copyText, showFieldErrors, saveApplication, bindTurnstile,
 } from './common.js';
 import { initHeader } from './site.js';
 
@@ -8,6 +8,7 @@ initHeader();
 
 const form = $('#apply');
 const startedAt = Date.now();
+const human = bindTurnstile($('#turnstile'));
 const DRAFT_KEY = 'itumtal.taslak';
 const MAX_PICKS = 3;
 
@@ -377,6 +378,7 @@ form.addEventListener('submit', async (e) => {
   const buttons = $$('button[type="submit"]', form);
   buttons.forEach((b) => setLoading(b, true));
   try {
+    body.turnstile = await human.token();
     const res = await api('/api/applications', { method: 'POST', body });
     clearDraft();
     const link = new URL(`takip.html?t=${res.token}`, location.href).href;
@@ -391,6 +393,7 @@ form.addEventListener('submit', async (e) => {
       showErrors({}, err.message);
     }
   } finally {
+    human.reset(); // tokens are single-use
     buttons.forEach((b) => setLoading(b, false));
   }
 });

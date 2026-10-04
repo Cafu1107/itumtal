@@ -272,6 +272,28 @@ export function validatePassword(pw) {
   return '';
 }
 
+// ---------- Turnstile ----------
+
+/**
+ * Cloudflare Turnstile server-side check. Returns true, or a short reason string.
+ * No secret configured = check disabled (true).
+ */
+export async function checkTurnstile(secret, token, ip, fetchImpl = fetch) {
+  if (!secret) return true;
+  if (typeof token !== 'string' || !token || token.length > 2048) return 'missing';
+  const form = new FormData();
+  form.append('secret', secret);
+  form.append('response', token);
+  if (ip && ip !== 'local') form.append('remoteip', ip);
+  try {
+    const res = await fetchImpl('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: form });
+    const out = await res.json();
+    return out.success ? true : (out['error-codes'] || ['failed']).join(',') || 'failed';
+  } catch {
+    return 'unreachable';
+  }
+}
+
 // ---------- CSV ----------
 
 export function toCSV(rows, columns) {

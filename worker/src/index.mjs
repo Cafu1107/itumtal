@@ -17,7 +17,7 @@ import {
   STATUSES, DISTRICTS, GRADES, TIME_PREFS, ROLES_TEACHER,
   todayTR, isISODate, addDays, isTime, parseSettings, validateSettings, dayBlock, remainingFor,
   validateApplication, clean, randomCode, randomToken, sha256, hashPassword, verifyPassword,
-  validatePassword, toCSV,
+  validatePassword, toCSV, checkTurnstile,
 } from './lib.mjs';
 
 const SESSION_HOURS = 12;
@@ -250,6 +250,8 @@ async function createApplication(request, env) {
   if (await env.DB.prepare('SELECT 1 FROM blocked_ips WHERE ip = ?1').bind(ip).first()) {
     reject(ip, 'blocked', 403, BLOCKED_MESSAGE);
   }
+  const human = await verifyTurnstile(env, body.turnstile, ip);
+  if (human !== true) reject(ip, `turnstile_${human}`, 400, TURNSTILE_MESSAGE);
 
   const settings = await loadSettings(env);
   if (!settings.booking_open) throw new HttpError(409, 'Ziyaret başvuruları şu anda kapalı.');
@@ -304,6 +306,11 @@ async function createApplication(request, env) {
   await logEvent(env, id, 'öğretmen', 'created', v.preferred_dates.join(', '));
   return json({ ok: true, code, token }, 201);
 }
+
+const TURNSTILE_MESSAGE = 'Robot doğrulaması tamamlanamadı. Sayfayı yenileyip tekrar deneyin.';
+
+/** Skipped (true) while TURNSTILE_SECRET is not configured, so the site keeps working without it. */
+const verifyTurnstile = (env, token, ip) => checkTurnstile(env.TURNSTILE_SECRET, token, ip);
 
 const BLOCKED_MESSAGE = 'Bu bağlantıdan başvuru kabul edilmiyor. Lütfen okulu 0212 261 24 20 numarasından arayın.';
 
@@ -373,6 +380,11 @@ async function login(request, env) {
   const body = await readJSON(request, 2048);
   const username = clean(body.username, 40).toLocaleLowerCase('tr');
   const password = String(body.password || '');
+  const human = await verifyTurnstile(env, body.turnstile, clientIP(request));
+  if (human !== true) {
+    console.log(JSON.stringify({ evt: 'login', result: `turnstile_${human}`, ip: clientIP(request), username }));
+    throw new HttpError(400, TURNSTILE_MESSAGE);
+  }
   if (!username || !password || password.length > 128) throw new HttpError(401, 'Kullanıcı adı veya şifre hatalı.');
 
   const u = await env.DB.prepare('SELECT * FROM users WHERE username = ?1').bind(username).first();
@@ -389,9 +401,11 @@ async function login(request, env) {
       await env.DB.prepare('UPDATE users SET failed = ?1, locked_until = ?2 WHERE id = ?3')
         .bind(lock ? 0 : fails, lock, u.id).run();
     }
+    console.log(JSON.stringify({ evt: 'login', result: 'bad_password', ip: clientIP(request), username }));
     throw new HttpError(401, 'Kullanıcı adı veya şifre hatalı.');
   }
 
+  console.log(JSON.stringify({ evt: 'login', result: 'ok', ip: clientIP(request), username }));
   const token = randomToken(32);
   const expires = new Date(Date.now() + SESSION_HOURS * 3600000).toISOString();
   await env.DB.batch([

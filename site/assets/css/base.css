@@ -307,6 +307,10 @@ ul, ol { margin: 0; padding: 0; }
 .stepper:focus-within { border-color: var(--ink); box-shadow: 0 0 0 3px rgb(31 91 214 / .25); }
 .stepper[aria-invalid="true"] { border-color: var(--bad); }
 
+/* Turnstile mounts here; it stays empty (no space) unless a challenge needs a click */
+.turnstile:empty { display: none; }
+.turnstile { margin-top: 16px; min-height: 0; }
+
 /* ---------- status pills ---------- */
 
 .pill {

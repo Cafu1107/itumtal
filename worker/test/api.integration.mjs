@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 
 const B = process.argv[2] || 'http://127.0.0.1:8787';
+// Accepted by Cloudflare's always-pass Turnstile test secret; ignored when the Worker has no secret.
+const TS = 'XXXX.DUMMY.TOKEN.XXXX';
 const ADMIN_PW = process.env.ADMIN_PASSWORD;
 const STAFF_PW = process.env.STAFF_PASSWORD;
 if (!ADMIN_PW || !STAFF_PW) { console.error('ADMIN_PASSWORD ve STAFF_PASSWORD gerekli.'); process.exit(1); }
@@ -25,7 +27,7 @@ async function call(method, path, body, token) {
 
 const step = (name) => console.log('•', name);
 
-const admin = (await call('POST', '/api/auth/login', { username: 'admin', password: ADMIN_PW })).data.token;
+const admin = (await call('POST', '/api/auth/login', { username: 'admin', password: ADMIN_PW, turnstile: TS })).data.token;
 assert.ok(admin, 'admin login');
 await call('PUT', '/api/admin/settings', { daily_capacity: 120, booking_open: true, notice: 'Kasım ayı yoğun geçiyor, erken başvurun.', weekdays: [1, 2, 3, 4, 5] }, admin);
 
@@ -42,7 +44,7 @@ for (const a of (await call('GET', '/api/admin/applications', undefined, admin))
 }
 
 step('validation errors come back per field');
-let r = await call('POST', '/api/applications', { school_name: 'a', kvkk: false, started_at: Date.now() - 10000 });
+let r = await call('POST', '/api/applications', { school_name: 'a', kvkk: false, started_at: Date.now() - 10000, turnstile: TS });
 assert.equal(r.status, 422);
 assert.ok(r.data.fields.school_name && r.data.fields.phone && r.data.fields.kvkk);
 
@@ -50,8 +52,13 @@ const base = {
   school_name: 'Levent Ortaokulu', district: 'Beşiktaş', teacher_name: 'Ayşe Yılmaz', teacher_role: 'Rehber öğretmen',
   phone: '0532 123 45 67', email: 'ayse@okul.k12.tr', student_count: 80, escort_count: 3, grade: '8. sınıf',
   time_pref: 'Sabah', preferred_dates: [d1, d2], note: 'Bir öğrencimiz tekerlekli sandalye kullanıyor.', kvkk: true,
-  started_at: Date.now() - 10000,
+  started_at: Date.now() - 10000, turnstile: TS,
 };
+
+if (process.env.TURNSTILE_ENFORCED) {
+  step('bots: missing Turnstile token is rejected');
+  assert.equal((await call('POST', '/api/applications', { ...base, turnstile: undefined })).status, 400);
+}
 
 step('bots: missing fill time is rejected');
 assert.equal((await call('POST', '/api/applications', { ...base, started_at: undefined })).status, 400);
@@ -74,7 +81,7 @@ assert.equal(r.data.visit_date, null);
 step('panel rejects missing / bad tokens');
 assert.equal((await call('GET', '/api/admin/applications')).status, 401);
 assert.equal((await call('GET', '/api/admin/applications', undefined, 'x'.repeat(43))).status, 401);
-assert.equal((await call('POST', '/api/auth/login', { username: 'admin', password: 'yanlis' })).status, 401);
+assert.equal((await call('POST', '/api/auth/login', { username: 'admin', password: 'yanlis', turnstile: TS })).status, 401);
 
 const list = (await call('GET', '/api/admin/applications', undefined, admin)).data.applications;
 const app = list.find((a) => a.code === code);
@@ -136,7 +143,7 @@ r = await call('DELETE', `/api/admin/blocked-ips/${encodeURIComponent(myIp)}`, u
 assert.ok(!r.data.blocked.some((b) => b.ip === myIp));
 
 step('staff can work applications but not manage users');
-const staff = (await call('POST', '/api/auth/login', { username: 'gulnihal', password: STAFF_PW })).data.token;
+const staff = (await call('POST', '/api/auth/login', { username: 'gulnihal', password: STAFF_PW, turnstile: TS })).data.token;
 assert.ok(staff);
 assert.equal((await call('GET', '/api/admin/applications', undefined, staff)).status, 200);
 assert.equal((await call('GET', '/api/admin/users', undefined, staff)).status, 403);

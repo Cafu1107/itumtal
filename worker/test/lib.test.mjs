@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SETTINGS, todayTR, isISODate, addDays, isoWeekday, isTime, parseSettings, validateSettings,
   dayBlock, remainingFor, normalizePhone, isEmail, clean, validateApplication, randomCode, randomToken,
-  hashPassword, verifyPassword, validatePassword, toCSV,
+  hashPassword, verifyPassword, validatePassword, toCSV, checkTurnstile,
 } from '../src/lib.mjs';
 
 const S = structuredClone(DEFAULT_SETTINGS);
@@ -130,4 +130,21 @@ test('toCSV escapes separators and neutralises formulas', () => {
   assert.ok(csv.includes('"x;y"'));
   assert.ok(csv.includes(`"'=HYPERLINK(""evil"")"`));
   assert.ok(csv.endsWith(';düz'));
+});
+
+test('checkTurnstile: off without a secret, strict with one', async () => {
+  const calls = [];
+  const fake = (answer) => async (url, init) => {
+    calls.push({ url, secret: init.body.get('secret'), response: init.body.get('response'), ip: init.body.get('remoteip') });
+    return { json: async () => answer };
+  };
+  assert.equal(await checkTurnstile('', undefined, '1.2.3.4', fake({ success: false })), true);
+  assert.equal(await checkTurnstile('s3cret', undefined, '1.2.3.4', fake({ success: true })), 'missing');
+  assert.equal(await checkTurnstile('s3cret', '', '1.2.3.4', fake({ success: true })), 'missing');
+  assert.equal(calls.length, 0, 'no network call without a token');
+  assert.equal(await checkTurnstile('s3cret', 'tok', '1.2.3.4', fake({ success: true })), true);
+  assert.deepEqual(calls.at(-1), { url: 'https://challenges.cloudflare.com/turnstile/v0/siteverify', secret: 's3cret', response: 'tok', ip: '1.2.3.4' });
+  assert.equal(await checkTurnstile('s3cret', 'tok', 'local', fake({ success: false, 'error-codes': ['invalid-input-response'] })), 'invalid-input-response');
+  assert.equal(calls.at(-1).ip, null);
+  assert.equal(await checkTurnstile('s3cret', 'tok', '1.2.3.4', async () => { throw new Error('down'); }), 'unreachable');
 });

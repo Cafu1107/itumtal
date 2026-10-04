@@ -2,6 +2,7 @@
 import {
   api, $, $$, esc, icon, asset, fmtDate, fmtDateTime, relTime, fmtPhone, pill, STATUS, MONTHS, DAYS_SHORT,
   parseISO, toISO, isoWeekday, addDays, todayTR, toast, confirmDialog, setLoading, copyText, showFieldErrors,
+  bindTurnstile,
 } from './common.js';
 
 const TOKEN_KEY = 'itumtal.panel.token';
@@ -85,6 +86,7 @@ function renderLogin(message = '') {
                 <button class="icon-btn" type="button" id="pw-toggle" aria-label="Şifreyi göster" aria-pressed="false">${icon('eye')}</button>
               </div>
             </div>
+            <div class="turnstile" id="turnstile"></div>
             <button class="btn btn--primary btn--lg btn--block" type="submit">Giriş yap</button>
           </form>
           <p class="login__foot"><a href="../">← Siteye dön</a></p>
@@ -92,6 +94,7 @@ function renderLogin(message = '') {
       </div>
     </div>`;
   const form = $('#login');
+  const human = bindTurnstile($('#turnstile'));
   $('#username').focus();
   $('#pw-toggle').addEventListener('click', (e) => {
     const pw = $('#password');
@@ -113,7 +116,8 @@ function renderLogin(message = '') {
     const btn = form.querySelector('[type="submit"]');
     setLoading(btn, true);
     try {
-      const res = await api('/api/auth/login', { method: 'POST', body: { username, password } });
+      const turnstile = await human.token();
+      const res = await api('/api/auth/login', { method: 'POST', body: { username, password, turnstile } });
       S.token = res.token;
       S.user = res.user;
       writeToken(res.token);
@@ -122,6 +126,7 @@ function renderLogin(message = '') {
       setLoading(btn, false);
       errBox.hidden = false;
       errBox.querySelector('span').textContent = err.message;
+      human.reset();
       form.password.select();
     }
   });

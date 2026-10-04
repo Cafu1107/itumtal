@@ -2,6 +2,8 @@
 
 const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 export const API_BASE = LOCAL ? 'http://127.0.0.1:8787' : 'https://itumtal-api.pota-proxy.workers.dev';
+// Cloudflare Turnstile site key (public). Locally: Cloudflare's always-pass test key. Empty = no check.
+export const TURNSTILE_SITEKEY = LOCAL ? '1x00000000000000000000AA' : '';
 
 /** Resolves a path against the site root, so pages in sub-folders (panel/) find assets. */
 const ROOT = new URL('../../', import.meta.url);
@@ -176,6 +178,59 @@ export function showFieldErrors(form, fields = {}) {
     if (msg && !first) first = control || el;
   }
   return first;
+}
+
+// ---------- Turnstile (bot check) ----------
+
+let turnstileReady;
+function loadTurnstile() {
+  turnstileReady ||= new Promise((resolve, reject) => {
+    window.onTurnstileLoad = () => resolve(window.turnstile);
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad';
+    s.async = true;
+    s.onerror = () => { turnstileReady = null; reject(new Error('Robot doğrulaması yüklenemedi. Sayfayı yenileyin.')); };
+    document.head.append(s);
+  });
+  return turnstileReady;
+}
+
+/**
+ * Mounts an invisible-unless-needed Turnstile widget in `el`.
+ * Returns { token(): Promise<string>, reset() }; token() resolves '' when Turnstile is off.
+ */
+export function bindTurnstile(el) {
+  if (!TURNSTILE_SITEKEY) return { token: async () => '', reset() {} };
+  let current = '';
+  let waiters = [];
+  let id = null;
+  const settle = (t) => { current = t; waiters.forEach((w) => w(t)); waiters = []; };
+  const ready = loadTurnstile().then((ts) => {
+    id = ts.render(el, {
+      sitekey: TURNSTILE_SITEKEY,
+      language: 'tr',
+      appearance: 'interaction-only',
+      callback: (t) => settle(t),
+      'expired-callback': () => { current = ''; },
+      'error-callback': () => { current = ''; },
+    });
+    return ts;
+  });
+  return {
+    async token() {
+      await ready;
+      if (current) return current;
+      // wait for the (usually invisible) challenge to finish, at most 20 s
+      return new Promise((resolve, reject) => {
+        waiters.push(resolve);
+        setTimeout(() => reject(new Error('Robot doğrulaması tamamlanmadı. Formun altındaki kutucuğu işaretleyip tekrar deneyin.')), 20000);
+      });
+    },
+    reset() {
+      current = '';
+      ready.then((ts) => { if (id !== null) ts.reset(id); }).catch(() => {});
+    },
+  };
 }
 
 // Saved tracking links (this browser only) so a teacher can find their application again.
