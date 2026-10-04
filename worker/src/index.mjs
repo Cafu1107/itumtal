@@ -22,6 +22,10 @@ import {
 
 const SESSION_HOURS = 12;
 const MAX_PENDING_PER_PHONE = 3;
+// Abuse limits, enforced inside the INSERT so parallel bursts can't race past them.
+const IP_MAX_10MIN = 3;
+const IP_MAX_DAY = 8;
+const GLOBAL_MAX_10MIN = 40;
 const LOCK_AFTER_FAILS = 5;
 const LOCK_MINUTES = 15;
 
@@ -112,6 +116,9 @@ async function route(request, env, ctx) {
   if (p === '/api/admin/settings' && m === 'GET') return getAdminSettings(env);
   if (p === '/api/admin/settings' && m === 'PUT') return putSettings(request, env);
   if (p === '/api/admin/closed-days' && m === 'POST') return addClosedDay(request, env);
+  if (p === '/api/admin/blocked-ips' && m === 'GET') return listBlocked(env);
+  if (p === '/api/admin/blocked-ips' && m === 'POST') return blockIP(request, env, user);
+  if ((mm = p.match(/^\/api\/admin\/blocked-ips\/([^/]{2,140})$/)) && m === 'DELETE') return unblockIP(env, decodeURIComponent(mm[1]));
   if ((mm = p.match(/^\/api\/admin\/closed-days\/(\d{4}-\d{2}-\d{2})$/)) && m === 'DELETE') return removeClosedDay(env, mm[1]);
 
   if (p.startsWith('/api/admin/users')) {
@@ -234,10 +241,14 @@ async function getConfig(env) {
 
 async function createApplication(request, env) {
   const body = await readJSON(request);
+  const ip = clientIP(request);
   // Honeypot + minimum fill time: bots fill every field and submit instantly.
-  if (body.website) throw new HttpError(400, 'Geçersiz istek.');
-  if (typeof body.started_at === 'number' && Date.now() - body.started_at < 4000) {
-    throw new HttpError(400, 'Form çok hızlı gönderildi. Lütfen bilgileri kontrol edip tekrar deneyin.');
+  if (body.website) reject(ip, 'honeypot', 400, 'Geçersiz istek.');
+  if (typeof body.started_at !== 'number' || Date.now() - body.started_at < 4000) {
+    reject(ip, 'too_fast', 400, 'Form çok hızlı gönderildi. Lütfen bilgileri kontrol edip tekrar deneyin.');
+  }
+  if (await env.DB.prepare('SELECT 1 FROM blocked_ips WHERE ip = ?1').bind(ip).first()) {
+    reject(ip, 'blocked', 403, BLOCKED_MESSAGE);
   }
 
   const settings = await loadSettings(env);
@@ -264,24 +275,54 @@ async function createApplication(request, env) {
 
   const token = randomToken(24);
   const now = nowISO();
+  const since10 = new Date(Date.now() - 10 * 60000).toISOString();
+  const sinceDay = new Date(Date.now() - 24 * 3600000).toISOString();
   let code, id;
   for (let attempt = 0; attempt < 5; attempt++) {
     code = randomCode(6);
     try {
+      // One statement is one atomic step in D1: the limits are checked and the row written together.
       const r = await env.DB.prepare(
         `INSERT INTO applications (code, token, school_name, district, teacher_name, teacher_role, phone, email,
-          student_count, escort_count, grade, time_pref, preferred_dates, note, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)`,
+          student_count, escort_count, grade, time_pref, preferred_dates, note, ip, created_at, updated_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?16, ?15, ?15
+         WHERE NOT EXISTS (SELECT 1 FROM blocked_ips WHERE ip = ?16)
+           AND (SELECT COUNT(*) FROM applications WHERE ip = ?16 AND created_at > ?17) < ?19
+           AND (SELECT COUNT(*) FROM applications WHERE ip = ?16 AND created_at > ?18) < ?20
+           AND (SELECT COUNT(*) FROM applications WHERE created_at > ?17) < ?21`,
       ).bind(code, token, v.school_name, v.district, v.teacher_name, v.teacher_role, v.phone, v.email,
-        v.student_count, v.escort_count, v.grade, v.time_pref, JSON.stringify(v.preferred_dates), v.note, now).run();
+        v.student_count, v.escort_count, v.grade, v.time_pref, JSON.stringify(v.preferred_dates), v.note, now,
+        ip, since10, sinceDay, IP_MAX_10MIN, IP_MAX_DAY, GLOBAL_MAX_10MIN).run();
+      if (!r.meta.changes) await rejectLimited(env, ip, since10, sinceDay);
       id = r.meta.last_row_id;
       break;
     } catch (err) {
       if (!String(err).includes('UNIQUE') || attempt === 4) throw err;
     }
   }
+  console.log(JSON.stringify({ evt: 'application', result: 'created', ip, code }));
   await logEvent(env, id, 'öğretmen', 'created', v.preferred_dates.join(', '));
   return json({ ok: true, code, token }, 201);
+}
+
+const BLOCKED_MESSAGE = 'Bu bağlantıdan başvuru kabul edilmiyor. Lütfen okulu 0212 261 24 20 numarasından arayın.';
+
+function reject(ip, reason, status, message) {
+  console.log(JSON.stringify({ evt: 'application', result: reason, ip }));
+  throw new HttpError(status, message);
+}
+
+/** Works out which limit stopped the guarded INSERT, for an honest message. Always throws. */
+async function rejectLimited(env, ip, since10, sinceDay) {
+  const r = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM applications WHERE ip = ?1 AND created_at > ?2) AS ip10,
+            (SELECT COUNT(*) FROM applications WHERE ip = ?1 AND created_at > ?3) AS ipDay,
+            EXISTS (SELECT 1 FROM blocked_ips WHERE ip = ?1) AS blocked`,
+  ).bind(ip, since10, sinceDay).first();
+  if (r.blocked) reject(ip, 'blocked', 403, BLOCKED_MESSAGE);
+  if (r.ip10 >= IP_MAX_10MIN) reject(ip, 'ip_10min', 429, 'Kısa sürede çok fazla başvuru gönderildi. Lütfen biraz sonra tekrar deneyin.');
+  if (r.ipDay >= IP_MAX_DAY) reject(ip, 'ip_day', 429, 'Bu bağlantıdan bugün çok fazla başvuru yapıldı. Yarın tekrar deneyin ya da okulu arayın.');
+  reject(ip, 'global_10min', 503, 'Şu anda çok yoğun başvuru alıyoruz. Lütfen birkaç dakika sonra tekrar deneyin.');
 }
 
 async function findByToken(env, token) {
@@ -403,7 +444,7 @@ async function changeOwnPassword(request, env, user) {
 
 async function listApplications(env) {
   const { results } = await env.DB.prepare(
-    `SELECT id, code, token, status, school_name, district, teacher_name, teacher_role, phone, email, student_count,
+    `SELECT id, code, token, ip, status, school_name, district, teacher_name, teacher_role, phone, email, student_count,
             escort_count, grade, time_pref, preferred_dates, note, visit_date, visit_time, admin_message,
             internal_note, cancelled_by, created_at, updated_at
      FROM applications ORDER BY created_at DESC LIMIT 5000`,
@@ -512,6 +553,7 @@ async function exportCSV(env) {
     { label: 'Öğretmene mesaj', get: (r) => r.admin_message },
     { label: 'İç not', get: (r) => r.internal_note },
     { label: 'Başvuru zamanı', get: (r) => r.created_at },
+    { label: 'IP', get: (r) => r.ip || '' },
   ]);
   return new Response(csv, {
     headers: {
@@ -557,6 +599,53 @@ async function addClosedDay(request, env) {
 async function removeClosedDay(env, date) {
   await env.DB.prepare('DELETE FROM closed_days WHERE date = ?1').bind(date).run();
   return getAdminSettings(env);
+}
+
+// ---------- panel: blocked IPs ----------
+
+async function listBlocked(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT b.ip, b.reason, b.created_by, b.created_at,
+            (SELECT COUNT(*) FROM applications a WHERE a.ip = b.ip) AS applications
+     FROM blocked_ips b ORDER BY b.created_at DESC`,
+  ).all();
+  return json({ blocked: results });
+}
+
+function isIP(s) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(s) || (/^[0-9a-f:]+$/i.test(s) && s.includes(':') && s.length <= 45);
+}
+
+async function blockIP(request, env, user) {
+  const body = await readJSON(request, 2048);
+  const ip = clean(body.ip, 64).toLowerCase();
+  if (!isIP(ip)) throw new HttpError(422, 'Geçerli bir IP adresi yazın.', { fields: { ip: 'Geçerli bir IP adresi yazın.' } });
+  const stmts = [
+    env.DB.prepare(`INSERT INTO blocked_ips (ip, reason, created_by, created_at) VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason`)
+      .bind(ip, clean(body.reason, 120), user.username, nowISO()),
+  ];
+  let deleted = 0;
+  if (body.delete_pending === true) {
+    const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE ip = ?1 AND status = 'pending'").bind(ip).first();
+    deleted = r.n;
+    stmts.push(
+      env.DB.prepare("DELETE FROM events WHERE app_id IN (SELECT id FROM applications WHERE ip = ?1 AND status = 'pending')").bind(ip),
+      env.DB.prepare("DELETE FROM applications WHERE ip = ?1 AND status = 'pending'").bind(ip),
+    );
+  }
+  await env.DB.batch(stmts);
+  const { results } = await env.DB.prepare(
+    `SELECT b.ip, b.reason, b.created_by, b.created_at,
+            (SELECT COUNT(*) FROM applications a WHERE a.ip = b.ip) AS applications
+     FROM blocked_ips b ORDER BY b.created_at DESC`,
+  ).all();
+  return json({ blocked: results, deleted });
+}
+
+async function unblockIP(env, ip) {
+  await env.DB.prepare('DELETE FROM blocked_ips WHERE ip = ?1').bind(ip).run();
+  return listBlocked(env);
 }
 
 // ---------- panel: users (admin only) ----------

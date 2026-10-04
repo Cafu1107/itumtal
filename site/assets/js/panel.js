@@ -13,6 +13,7 @@ const S = {
   apps: [],
   settings: null,
   closed: [],
+  blocked: [],
   today: todayTR(),
   view: null,
   filter: 'pending',
@@ -133,7 +134,7 @@ let pollTimer;
 async function start() {
   renderShell();
   try {
-    await Promise.all([loadApps(), loadSettings()]);
+    await Promise.all([loadApps(), loadSettings(), loadBlocked()]);
   } catch (err) {
     if (err.status !== 401) toast(err.message, { type: 'bad' });
     if (!S.token) return;
@@ -210,6 +211,13 @@ async function loadSettings() {
   S.closed = res.closed_days;
 }
 
+async function loadBlocked() {
+  const res = await authed('/api/admin/blocked-ips');
+  S.blocked = res.blocked;
+}
+
+const isBlocked = (ip) => !!ip && S.blocked.some((b) => b.ip === ip);
+
 const closedMap = () => new Map(S.closed.map((c) => [c.date, c.reason]));
 
 /** Approved students per date, optionally ignoring one application. */
@@ -275,7 +283,7 @@ function filtered() {
   let list = S.apps.filter((a) => S.filter === 'all' || a.status === S.filter);
   if (q) {
     const qDigits = q.replace(/\D/g, '');
-    list = list.filter((a) => fold(`${a.school_name} ${a.teacher_name} ${a.district} ${a.code} ${a.email}`).includes(q)
+    list = list.filter((a) => fold(`${a.school_name} ${a.teacher_name} ${a.district} ${a.code} ${a.email} ${a.ip || ''}`).includes(q)
       || (qDigits.length >= 3 && a.phone.includes(qDigits)));
   }
   const by = (k, dir = 1) => (x, y) => (x[k] < y[k] ? -dir : x[k] > y[k] ? dir : 0);
@@ -315,7 +323,7 @@ function renderApps() {
       <label class="search">
         <span class="visually-hidden">Ara</span>
         ${icon('search')}
-        <input class="input" type="search" id="q" placeholder="Okul, öğretmen, kod veya telefon" value="${esc(S.q)}" autocomplete="off">
+        <input class="input" type="search" id="q" placeholder="Okul, öğretmen, kod, telefon veya IP" value="${esc(S.q)}" autocomplete="off">
       </label>
     </div>
     <div id="list"></div>`;
@@ -615,6 +623,17 @@ function renderDrawer(a, events, { keepScroll = false } = {}) {
         ${events ? `<ol class="events">${events.map((ev) => `<li><time>${esc(fmtDateTime(ev.at))}</time><span><b>${esc(EVENT_TEXT[ev.action] || ev.action)}</b> · ${esc(ev.actor)}${ev.detail ? ` · ${esc(ev.action === 'created' ? ev.detail.split(', ').map((d) => shortDate(d)).join(', ') : ev.detail)}` : ''}</span></li>`).join('')}</ol>` : '<div class="skel" style="height:60px"></div>'}
       </section>
 
+      <section class="box">
+        <h3>Güvenlik</h3>
+        ${a.ip ? `<p style="color:var(--ink-2);font-size:.9375rem">IP adresi <b class="mono">${esc(a.ip)}</b> · bu adresten ${S.apps.filter((x) => x.ip === a.ip).length} başvuru${isBlocked(a.ip) ? ' · <b style="color:var(--bad)">engelli</b>' : ''}</p>
+        <div class="btn-row" style="margin-top:12px">
+          ${isBlocked(a.ip)
+            ? `<button class="btn btn--sm" type="button" id="do-unblock">${icon('check')}Engeli kaldır</button>`
+            : `<button class="btn btn--sm btn--danger" type="button" id="do-block">${icon('ban')}Bu IP'yi engelle</button>`}
+          <button class="btn btn--sm btn--ghost" type="button" id="filter-ip">${icon('search')}Bu IP'nin başvuruları</button>
+        </div>` : '<p class="hint">Bu başvuru IP kaydı tutulmaya başlanmadan önce yapılmış.</p>'}
+      </section>
+
       <button class="btn btn--sm btn--ghost" type="button" id="do-delete" style="justify-self:start;color:var(--bad)">${icon('trash')}Başvuruyu kalıcı olarak sil</button>
     </div>`;
 
@@ -673,6 +692,22 @@ function wireDrawer(a) {
   note.addEventListener('blur', saveNote);
   let t;
   note.addEventListener('input', () => { clearTimeout(t); $('#note-state').textContent = ''; t = setTimeout(saveNote, 1200); });
+
+  $('#do-block')?.addEventListener('click', () => blockFlow(a.ip));
+  $('#do-unblock')?.addEventListener('click', async () => {
+    try {
+      const res = await authed(`/api/admin/blocked-ips/${encodeURIComponent(a.ip)}`, { method: 'DELETE' });
+      S.blocked = res.blocked;
+      toast('Engel kaldırıldı.');
+      renderDrawer(S.apps.find((x) => x.id === a.id) || a, null);
+    } catch (err) { toast(err.message, { type: 'bad' }); }
+  });
+  $('#filter-ip')?.addEventListener('click', () => {
+    S.filter = 'all';
+    S.q = a.ip;
+    S.view = null;
+    go('basvurular');
+  });
 
   $('#do-delete').addEventListener('click', async () => {
     const ok = await confirmDialog({ title: 'Başvuru kalıcı olarak silinsin mi?', text: 'Bu işlem geri alınamaz. Öğretmenin takip bağlantısı da çalışmaz hâle gelir.', ok: 'Sil', danger: true });
@@ -771,6 +806,37 @@ async function act(a, body, btn, okMsg, form) {
     toast(err.message, { type: 'bad' });
   } finally {
     if (document.contains(btn)) setLoading(btn, false);
+  }
+}
+
+/** Blocks an IP, optionally deleting its pending applications. Used by the drawer and settings. */
+async function blockFlow(ip) {
+  const pending = S.apps.filter((x) => x.ip === ip && x.status === 'pending').length;
+  const vals = await promptDialog({
+    title: `${ip} engellensin mi?`,
+    text: 'Bu adresten yeni başvuru kabul edilmez. Not: okullar ve mobil operatörler aynı IP adresini birçok kişiyle paylaşabilir.',
+    fields: [
+      { name: 'reason', label: 'Neden (isteğe bağlı)', placeholder: 'Örn. sahte başvurular' },
+      ...(pending ? [{ name: 'delete_pending', type: 'checkbox', label: `Bu adresten gelen ${pending} bekleyen başvuruyu da sil` , value: true }] : []),
+    ],
+    ok: 'Engelle',
+  });
+  if (!vals) return false;
+  try {
+    const res = await authed('/api/admin/blocked-ips', { method: 'POST', body: { ip, reason: vals.reason, delete_pending: vals.delete_pending === true } });
+    S.blocked = res.blocked;
+    if (res.deleted) {
+      await loadApps();
+      if (S.openId && !S.apps.some((x) => x.id === S.openId)) closeDrawer();
+    }
+    toast(res.deleted ? `IP engellendi, ${res.deleted} başvuru silindi.` : 'IP engellendi.');
+    refreshView();
+    const open = S.openId && S.apps.find((x) => x.id === S.openId);
+    if (open) renderDrawer(open, null);
+    return true;
+  } catch (err) {
+    toast(err.message, { type: 'bad' });
+    return false;
   }
 }
 
@@ -995,6 +1061,18 @@ function renderSettings() {
       </section>
 
       <section class="panel-card">
+        <div class="panel-card__head">${icon('shield')}<div><h2>Engellenen IP'ler</h2><p>Bu adreslerden başvuru kabul edilmez. Okullar ve mobil operatörler aynı IP'yi paylaşabilir; dikkatli kullanın.</p></div></div>
+        <form id="block-form" novalidate>
+          <div class="grid-2">
+            <div class="field"><label class="label" for="b_ip">IP adresi</label><input class="input mono" id="b_ip" name="ip" autocomplete="off" spellcheck="false" placeholder="örn. 203.0.113.7"><p class="error-text" data-error-for="ip"></p></div>
+            <div class="field"><label class="label" for="b_reason">Neden <span class="opt">(isteğe bağlı)</span></label><input class="input" id="b_reason" name="reason" maxlength="120"></div>
+          </div>
+          <div class="card-actions"><button class="btn btn--primary btn--sm" type="submit">${icon('ban')}Engelle</button></div>
+        </form>
+        <ul class="closed-list" id="blocked-list"></ul>
+      </section>
+
+      <section class="panel-card">
         <div class="panel-card__head">${icon('lock')}<div><h2>Şifremi değiştir</h2><p>${esc(S.user.display_name)} (${esc(S.user.username)})</p></div></div>
         <form id="pw-form" novalidate>
           <div class="field"><label class="label" for="pw_current">Mevcut şifre</label><input class="input" type="password" id="pw_current" name="current" autocomplete="current-password"><p class="error-text" data-error-for="current"></p></div>
@@ -1022,7 +1100,26 @@ function renderSettings() {
     </div>`;
 
   renderClosedList();
+  renderBlockedList();
   if (isAdmin) loadUsers();
+
+  $('#block-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const ip = form.ip.value.trim();
+    if (!ip) { showFieldErrors(form, { ip: 'IP adresini yazın.' }); return; }
+    const btn = form.querySelector('[type=submit]');
+    setLoading(btn, true);
+    try {
+      const res = await authed('/api/admin/blocked-ips', { method: 'POST', body: { ip, reason: form.reason.value } });
+      S.blocked = res.blocked;
+      form.reset();
+      showFieldErrors(form, {});
+      renderBlockedList();
+      toast('IP engellendi.');
+    } catch (err) { showFieldErrors(form, err.data?.fields || {}); toast(err.message, { type: 'bad' }); }
+    setLoading(btn, false);
+  });
 
   $('#booking_open').addEventListener('change', async (e) => {
     const on = e.target.checked;
@@ -1136,6 +1233,22 @@ function renderClosedList() {
   }));
 }
 
+function renderBlockedList() {
+  const ul = $('#blocked-list');
+  if (!ul) return;
+  ul.innerHTML = S.blocked.length
+    ? S.blocked.map((b) => `<li><span><b class="mono">${esc(b.ip)}</b><br><small>${b.reason ? `${esc(b.reason)} · ` : ''}${b.applications} başvuru · ${esc(b.created_by)}, ${esc(relTime(b.created_at))}</small></span><button class="icon-btn" type="button" data-unblock="${esc(b.ip)}" aria-label="${esc(b.ip)} engelini kaldır">${icon('trash')}</button></li>`).join('')
+    : '<li><span class="hint">Engellenmiş IP yok.</span></li>';
+  $$('[data-unblock]', ul).forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const res = await authed(`/api/admin/blocked-ips/${encodeURIComponent(b.dataset.unblock)}`, { method: 'DELETE' });
+      S.blocked = res.blocked;
+      renderBlockedList();
+      toast('Engel kaldırıldı.');
+    } catch (err) { toast(err.message, { type: 'bad' }); }
+  }));
+}
+
 async function loadUsers() {
   try {
     const res = await authed('/api/admin/users');
@@ -1190,7 +1303,9 @@ function promptDialog({ title, text = '', fields, ok = 'Kaydet', validate }) {
         <div class="modal__body">
           <h2 class="modal__title">${esc(title)}</h2>
           ${text ? `<p class="modal__text">${esc(text)}</p>` : ''}
-          ${fields.map((f, i) => `<div class="field" style="margin-top:8px"><label class="label" for="pd${i}">${esc(f.label)}</label><input class="input" id="pd${i}" name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value || '')}" placeholder="${esc(f.placeholder || '')}" autocomplete="off"></div>`).join('')}
+          ${fields.map((f, i) => (f.type === 'checkbox'
+            ? `<label class="check" style="margin-top:8px"><input type="checkbox" name="${f.name}" ${f.value ? 'checked' : ''}><span>${esc(f.label)}</span></label>`
+            : `<div class="field" style="margin-top:8px"><label class="label" for="pd${i}">${esc(f.label)}</label><input class="input" id="pd${i}" name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value || '')}" placeholder="${esc(f.placeholder || '')}" autocomplete="off"></div>`)).join('')}
           <p class="error-text" id="pd-error"></p>
         </div>
         <div class="modal__actions">
@@ -1200,7 +1315,7 @@ function promptDialog({ title, text = '', fields, ok = 'Kaydet', validate }) {
       </form>`;
     document.body.append(d);
     const form = d.querySelector('form');
-    const values = () => Object.fromEntries(fields.map((f) => [f.name, form.elements[f.name].value.trim()]));
+    const values = () => Object.fromEntries(fields.map((f) => [f.name, f.type === 'checkbox' ? form.elements[f.name].checked : form.elements[f.name].value.trim()]));
     form.addEventListener('submit', (e) => {
       if (e.submitter?.value !== 'yes') return;
       const msg = validate?.(values());

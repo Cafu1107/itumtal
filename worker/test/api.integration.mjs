@@ -42,7 +42,7 @@ for (const a of (await call('GET', '/api/admin/applications', undefined, admin))
 }
 
 step('validation errors come back per field');
-let r = await call('POST', '/api/applications', { school_name: 'a', kvkk: false });
+let r = await call('POST', '/api/applications', { school_name: 'a', kvkk: false, started_at: Date.now() - 10000 });
 assert.equal(r.status, 422);
 assert.ok(r.data.fields.school_name && r.data.fields.phone && r.data.fields.kvkk);
 
@@ -50,7 +50,11 @@ const base = {
   school_name: 'Levent Ortaokulu', district: 'Beşiktaş', teacher_name: 'Ayşe Yılmaz', teacher_role: 'Rehber öğretmen',
   phone: '0532 123 45 67', email: 'ayse@okul.k12.tr', student_count: 80, escort_count: 3, grade: '8. sınıf',
   time_pref: 'Sabah', preferred_dates: [d1, d2], note: 'Bir öğrencimiz tekerlekli sandalye kullanıyor.', kvkk: true,
+  started_at: Date.now() - 10000,
 };
+
+step('bots: missing fill time is rejected');
+assert.equal((await call('POST', '/api/applications', { ...base, started_at: undefined })).status, 400);
 
 step('honeypot is rejected');
 assert.equal((await call('POST', '/api/applications', { ...base, website: 'x' })).status, 400);
@@ -119,6 +123,17 @@ r = await call('POST', '/api/admin/closed-days', { date: d3, reason: 'Sınav haf
 assert.ok(r.data.closed_days.some((c) => c.date === d3 && c.reason === 'Sınav haftası'));
 assert.ok(!((await call('GET', '/api/config')).data.days[d3] >= 0));
 await call('DELETE', `/api/admin/closed-days/${d3}`, undefined, admin);
+
+step('blocked IPs cannot apply; unblocking restores access');
+const myIp = (await call('GET', '/api/admin/applications', undefined, admin)).data.applications.find((a) => a.code === code).ip;
+assert.ok(myIp, 'application stores the IP');
+assert.equal((await call('POST', '/api/admin/blocked-ips', { ip: 'not-an-ip' }, admin)).status, 422);
+r = await call('POST', '/api/admin/blocked-ips', { ip: myIp, reason: 'test' }, admin);
+assert.ok(r.data.blocked.some((b) => b.ip === myIp));
+r = await call('POST', '/api/applications', { ...base, phone: '0533 000 00 09', student_count: 1, preferred_dates: [d2] });
+assert.equal(r.status, 403);
+r = await call('DELETE', `/api/admin/blocked-ips/${encodeURIComponent(myIp)}`, undefined, admin);
+assert.ok(!r.data.blocked.some((b) => b.ip === myIp));
 
 step('staff can work applications but not manage users');
 const staff = (await call('POST', '/api/auth/login', { username: 'gulnihal', password: STAFF_PW })).data.token;
