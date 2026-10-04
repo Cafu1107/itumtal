@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ziyaret Başvurusu · İTÜ MTAL</title>
+  <meta name="description" content="İTÜ Mesleki ve Teknik Anadolu Lisesi okul tanıtım ziyareti başvuru formu.">
+  <meta name="theme-color" content="#f5f3ee">
+  <link rel="icon" href="assets/img/icon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="assets/img/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+  <link rel="stylesheet" href="assets/css/base.css">
+  <link rel="stylesheet" href="assets/css/site.css">
+  <script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+  <a class="skip-link" href="#main">İçeriğe geç</a>
+
+  <header class="site-header">
+    <div class="wrap site-header__inner">
+      <a class="brand" href="./" aria-label="İTÜ MTAL ana sayfa">
+        <img src="assets/img/logo.webp" alt="" width="44" height="44">
+        <span class="brand__text">
+          <span class="brand__name">İTÜ MTAL</span>
+          <span class="brand__sub">Mesleki ve Teknik Anadolu Lisesi</span>
+        </span>
+      </a>
+      <nav class="nav" id="site-nav" aria-label="Ana menü">
+        <a href="./#alanlar">Alanlar</a>
+        <a href="./#kampus">Kampüs</a>
+        <a href="./#konum">Konum</a>
+        <a href="takip.html">Başvuru takibi</a>
+        <a class="btn btn--primary btn--sm" href="basvuru.html" aria-current="page">Ziyaret başvurusu</a>
+      </nav>
+      <button class="icon-btn menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Menüyü aç">
+        <svg aria-hidden="true"><use href="assets/icons.svg#menu"></use></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap">
+      <div class="page-head" id="page-head">
+        <a class="back-link" href="./"><svg aria-hidden="true"><use href="assets/icons.svg#arrow-left"></use></svg>Ana sayfa</a>
+        <p class="eyebrow">Okul tanıtım ziyareti</p>
+        <h1 class="display" style="margin-top:12px">Ziyaret başvurusu</h1>
+        <p>Formu doldurun; rehberlik servisimiz sizinle iletişime geçerek ziyaret günü ve saatini birlikte belirlesin. Başvuru yaklaşık iki dakika sürer.</p>
+      </div>
+
+      <div id="notices" style="display:grid;gap:12px;margin-bottom:20px"></div>
+
+      <form class="apply" id="apply" novalidate>
+        <div class="apply__main">
+          <div class="callout callout--bad form-alert" id="form-alert" role="alert" hidden></div>
+
+          <!-- 1: group -->
+          <section class="panel-card" id="step-1" aria-labelledby="h-step-1">
+            <div class="panel-card__head">
+              <span class="panel-card__no">1</span>
+              <div><h2 id="h-step-1">Grubunuz</h2><p>Takvimde, grubunuzun sığabileceği günleri görürsünüz.</p></div>
+            </div>
+            <div class="field">
+              <label class="label" for="student_count">Öğrenci sayısı</label>
+              <div class="count-row">
+                <div class="stepper" data-control-for="student_count">
+                  <button type="button" data-step="-1" aria-label="Bir azalt"><svg aria-hidden="true"><use href="assets/icons.svg#minus"></use></svg></button>
+                  <input id="student_count" name="student_count" type="number" inputmode="numeric" min="1" max="120" value="30" required aria-describedby="count-hint">
+                  <button type="button" data-step="1" aria-label="Bir artır"><svg aria-hidden="true"><use href="assets/icons.svg#plus"></use></svg></button>
+                </div>
+                <p class="hint" id="count-hint">Bir günde en fazla <b data-capacity>120</b> öğrenci ağırlayabiliyoruz.</p>
+              </div>
+              <p class="error-text" data-error-for="student_count"></p>
+            </div>
+            <fieldset class="field" style="border:0;padding:0;margin:18px 0 0">
+              <legend class="label" style="padding:0;margin-bottom:6px">Sınıf düzeyi</legend>
+              <div class="seg" data-control-for="grade">
+                <input type="radio" name="grade" id="g8" value="8. sınıf" checked><label for="g8">8. sınıf</label>
+                <input type="radio" name="grade" id="g7" value="7. sınıf"><label for="g7">7. sınıf</label>
+                <input type="radio" name="grade" id="gk" value="Karma"><label for="gk">Karma</label>
+                <input type="radio" name="grade" id="gd" value="Diğer"><label for="gd">Diğer</label>
+              </div>
+              <p class="error-text" data-error-for="grade"></p>
+            </fieldset>
+            <div class="field">
+              <label class="label" for="escort_count">Size eşlik edecek öğretmen sayısı <span class="opt">(isteğe bağlı)</span></label>
+              <input class="input" id="escort_count" name="escort_count" type="number" inputmode="numeric" min="0" max="50" style="max-width:140px" placeholder="Örn. 2">
+              <p class="error-text" data-error-for="escort_count"></p>
+            </div>
+          </section>
+
+          <!-- 2: dates -->
+          <section class="panel-card" id="step-2" aria-labelledby="h-step-2">
+            <div class="panel-card__head">
+              <span class="panel-card__no">2</span>
+              <div><h2 id="h-step-2">Uygun günler</h2><p>Size uygun en fazla <b>3 günü</b> tercih sıranıza göre seçin.</p></div>
+            </div>
+            <div class="cal" id="cal" data-control-for="preferred_dates">
+              <div class="cal__bar">
+                <h3 class="cal__title" id="cal-title" aria-live="polite">—</h3>
+                <div class="cal__nav">
+                  <button class="icon-btn" type="button" id="cal-prev" aria-label="Önceki ay"><svg aria-hidden="true"><use href="assets/icons.svg#chevron-left"></use></svg></button>
+                  <button class="icon-btn" type="button" id="cal-next" aria-label="Sonraki ay"><svg aria-hidden="true"><use href="assets/icons.svg#chevron-right"></use></svg></button>
+                </div>
+              </div>
+              <div class="cal__grid" id="cal-grid" role="group" aria-labelledby="cal-title">
+                <div class="skel" style="grid-column:1/-1;height:330px"></div>
+              </div>
+              <div class="cal__legend" aria-hidden="true">
+                <span><i></i>Müsait</span>
+                <span><i class="low"></i>Az yer kaldı</span>
+                <span><i class="full"></i>Grubunuza yetmiyor</span>
+                <span><i class="sel"></i>Seçtiğiniz gün</span>
+              </div>
+            </div>
+            <ol class="picks" id="picks" aria-label="Seçtiğiniz günler"></ol>
+            <p class="picks-empty" id="picks-empty">Henüz gün seçmediniz. Takvimden bir gün seçin.</p>
+            <p class="error-text" data-error-for="preferred_dates" style="margin-top:10px"></p>
+
+            <fieldset class="field" style="border:0;padding:0;margin:24px 0 0">
+              <legend class="label" style="padding:0;margin-bottom:6px">Saat tercihi</legend>
+              <div class="seg">
+                <input type="radio" name="time_pref" id="t1" value="Sabah"><label for="t1">Sabah</label>
+                <input type="radio" name="time_pref" id="t2" value="Öğleden sonra"><label for="t2">Öğleden sonra</label>
+                <input type="radio" name="time_pref" id="t3" value="Fark etmez" checked><label for="t3">Fark etmez</label>
+              </div>
+              <p class="hint">Kesin saat, rehberlik servisimizle görüşmenizde belirlenir.</p>
+            </fieldset>
+          </section>
+
+          <!-- 3: contact -->
+          <section class="panel-card" id="step-3" aria-labelledby="h-step-3">
+            <div class="panel-card__head">
+              <span class="panel-card__no">3</span>
+              <div><h2 id="h-step-3">Okul ve iletişim</h2><p>Rehberlik servisimiz size bu bilgilerle ulaşacak.</p></div>
+            </div>
+            <div class="grid-2">
+              <div class="field span-2">
+                <label class="label" for="school_name">Okulunuzun adı</label>
+                <input class="input" id="school_name" name="school_name" autocomplete="organization" placeholder="Örn. Levent Ortaokulu" maxlength="120" required>
+                <p class="error-text" data-error-for="school_name"></p>
+              </div>
+              <div class="field">
+                <label class="label" for="district">İlçe</label>
+                <select class="select" id="district" name="district" required><option value="">Seçin</option></select>
+                <p class="error-text" data-error-for="district"></p>
+              </div>
+              <div class="field">
+                <label class="label" for="teacher_role">Göreviniz <span class="opt">(isteğe bağlı)</span></label>
+                <select class="select" id="teacher_role" name="teacher_role"><option value="">Seçin</option></select>
+              </div>
+              <div class="field span-2">
+                <label class="label" for="teacher_name">Adınız ve soyadınız</label>
+                <input class="input" id="teacher_name" name="teacher_name" autocomplete="name" maxlength="80" required>
+                <p class="error-text" data-error-for="teacher_name"></p>
+              </div>
+              <div class="field">
+                <label class="label" for="phone">Telefon</label>
+                <input class="input" id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0532 123 45 67" maxlength="20" required>
+                <p class="error-text" data-error-for="phone"></p>
+              </div>
+              <div class="field">
+                <label class="label" for="email">E-posta</label>
+                <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="ornek@okul.k12.tr" maxlength="160" required>
+                <p class="error-text" data-error-for="email"></p>
+              </div>
+              <div class="field span-2">
+                <label class="label" for="note">Eklemek istedikleriniz <span class="opt">(isteğe bağlı)</span></label>
+                <textarea class="textarea" id="note" name="note" maxlength="600" placeholder="Örn. özel gereksinimi olan öğrencimiz var, servisle geleceğiz…"></textarea>
+              </div>
+            </div>
+            <div class="field" style="margin-top:22px">
+              <label class="check">
+                <input type="checkbox" name="kvkk" id="kvkk" required>
+                <span>Kişisel verilerimin ziyaret başvurusunun değerlendirilmesi ve benimle iletişime geçilmesi amacıyla işlenmesine ilişkin <a href="kvkk.html" target="_blank" rel="noopener">aydınlatma metnini</a> okudum.</span>
+              </label>
+              <p class="error-text" data-error-for="kvkk"></p>
+            </div>
+            <div class="visually-hidden" aria-hidden="true">
+              <label for="website">Bu alanı boş bırakın</label>
+              <input id="website" name="website" tabindex="-1" autocomplete="off">
+            </div>
+          </section>
+
+          <div class="mobile-submit">
+            <div class="mobile-submit__info" id="mobile-info"><b>30 öğrenci</b>Gün seçilmedi</div>
+            <button class="btn btn--signal" type="submit">Gönder</button>
+          </div>
+        </div>
+
+        <aside class="summary" aria-label="Başvuru özeti">
+          <div class="summary__card">
+            <h2>Başvuru özeti</h2>
+            <dl id="summary"></dl>
+            <button class="btn btn--signal btn--block btn--lg" type="submit">Başvuruyu gönder</button>
+            <p class="summary__note"><svg aria-hidden="true"><use href="assets/icons.svg#info"></use></svg><span>Gönderdikten sonra başvurunuzu izleyebileceğiniz bir bağlantı verilir.</span></p>
+          </div>
+          <div class="callout callout--info">
+            <svg aria-hidden="true"><use href="assets/icons.svg#phone"></use></svg>
+            <span>Sorunuz mu var? Okulumuzu <a href="tel:+902122612420"><b>0212 261 24 20</b></a> numarasından arayabilirsiniz.</span>
+          </div>
+        </aside>
+      </form>
+
+      <section class="done" id="done" hidden tabindex="-1" aria-labelledby="done-title"></section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="stripes stripes--thin" aria-hidden="true"></div>
+    <div class="wrap"><div class="site-footer__base">
+      <span>© 2026 İTÜ Mesleki ve Teknik Anadolu Lisesi</span>
+      <span><a href="kvkk.html">Aydınlatma metni</a> · <a href="takip.html">Başvuru takibi</a></span>
+    </div></div>
+  </footer>
+
+  <script type="module" src="assets/js/basvuru.js"></script>
+</body>
+</html>

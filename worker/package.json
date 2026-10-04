@@ -1,0 +1,16 @@
+{
+  "name": "itumtal-api",
+  "private": true,
+  "description": "Cloudflare Worker + D1 behind the İTÜ MTAL visit booking site.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply itumtal-ziyaret --local",
+    "migrate:remote": "wrangler d1 migrations apply itumtal-ziyaret --remote",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}

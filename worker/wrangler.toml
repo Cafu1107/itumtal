@@ -1,0 +1,36 @@
+# İTÜ MTAL ziyaret başvuru API'si. Deploy: npm install && npm run deploy
+name = "itumtal-api"
+main = "src/index.mjs"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+# Comma-separated origins allowed to call the API from a browser.
+ALLOWED_ORIGINS = "https://cafu1107.github.io,http://localhost:5500,http://127.0.0.1:5500"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "itumtal-ziyaret"
+database_id = "3628288f-268e-435d-ba70-cec764c40b8f"
+migrations_dir = "migrations"
+
+# Requests per address per minute (src/index.mjs falls back to in-memory counters).
+[[ratelimits]]
+name = "LIMIT_READ"
+namespace_id = "2001"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "LIMIT_WRITE"
+namespace_id = "2002"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "LIMIT_LOGIN"
+namespace_id = "2003"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "LIMIT_ADMIN"
+namespace_id = "2004"
+simple = { limit = 300, period = 60 }
