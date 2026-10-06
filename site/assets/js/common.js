@@ -58,6 +58,37 @@ export const toISO = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d
 export const isoWeekday = (iso) => { const w = new Date(iso + 'T00:00:00Z').getUTCDay(); return w === 0 ? 7 : w; };
 export const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 export const todayTR = () => new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10);
+export const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+export const mondayOf = (iso) => addDays(iso, 1 - isoWeekday(iso));
+
+/** Same rule as worker/src/lib.mjs isVisitDay: weekday + start date + every-N-weeks rhythm. */
+export function isVisitDay(iso, s) {
+  if (!s.weekdays.includes(isoWeekday(iso))) return false;
+  if (s.start_date && iso < s.start_date) return false;
+  const every = s.week_interval || 1;
+  if (every > 1 && s.start_date && Math.round(daysBetween(mondayOf(s.start_date), mondayOf(iso)) / 7) % every !== 0) return false;
+  return true;
+}
+
+const EVERY = { 2: 'İki haftada bir', 3: 'Üç haftada bir', 4: 'Dört haftada bir' };
+
+/** "İki haftada bir salı", "Her salı ve perşembe", "Hafta içi her gün" */
+export function rhythmText(s) {
+  const days = [...s.weekdays].sort();
+  if (!days.length) return 'Ziyaret günleri duyurulacak';
+  const names = days.map((d) => DAYS[d - 1].toLocaleLowerCase('tr'));
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} ve ${names.at(-1)}` : names[0];
+  if ((s.week_interval || 1) > 1) return `${EVERY[s.week_interval]} ${list}`;
+  if (days.join() === '1,2,3,4,5') return 'Hafta içi her gün';
+  return `Her ${list}`;
+}
+
+/** Next `n` visit days on or after `from` (ignores closed days). */
+export function nextVisitDays(s, from, n = 6) {
+  const out = [];
+  for (let d = from, guard = 0; out.length < n && guard < 800; d = addDays(d, 1), guard++) if (isVisitDay(d, s)) out.push(d);
+  return out;
+}
 
 /** "14 Ekim Salı" / with year: "14 Ekim 2026 Salı" */
 export function fmtDate(iso, { year = false, weekday = true } = {}) {
@@ -200,7 +231,7 @@ function loadTurnstile() {
  * Returns { token(): Promise<string>, reset() }; token() resolves '' when Turnstile is off.
  */
 export function bindTurnstile(el) {
-  if (!TURNSTILE_SITEKEY) return { token: async () => '', reset() {} };
+  if (!TURNSTILE_SITEKEY) return { token: async () => '', reset() {}, remove() {} };
   let current = '';
   let waiters = [];
   let id = null;
@@ -229,6 +260,10 @@ export function bindTurnstile(el) {
     reset() {
       current = '';
       ready.then((ts) => { if (id !== null) ts.reset(id); }).catch(() => {});
+    },
+    /** Call before the widget's element leaves the page. */
+    remove() {
+      ready.then((ts) => { if (id !== null) ts.remove(id); id = null; }).catch(() => {});
     },
   };
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SETTINGS, todayTR, isISODate, addDays, isoWeekday, isTime, parseSettings, validateSettings,
   dayBlock, remainingFor, normalizePhone, isEmail, clean, validateApplication, randomCode, randomToken,
-  hashPassword, verifyPassword, validatePassword, toCSV, checkTurnstile,
+  hashPassword, verifyPassword, validatePassword, toCSV, checkTurnstile, isVisitDay, mondayOf, settingsComboErrors,
 } from '../src/lib.mjs';
 
 const S = structuredClone(DEFAULT_SETTINGS);
@@ -70,6 +70,11 @@ test('normalizePhone accepts common Turkish formats', () => {
 test('email + clean', () => {
   assert.ok(isEmail('rehberlik@okul.k12.tr'));
   assert.ok(!isEmail('a@b'));
+  // characters that could add recipients or headers to a mailto: link are refused
+  assert.ok(!isEmail('ogretmen@okul.com?cc=evil@x.com'));
+  assert.ok(!isEmail('ogretmen@okul.com&bcc=evil@x.com'));
+  assert.ok(!isEmail('a,b@okul.com'));
+  assert.ok(isEmail('ad.soyad+tanitim@meb.gov.tr'));
   assert.equal(clean('  Atatürk   Ortaokulu \u0000 ', 50), 'Atatürk Ortaokulu');
   assert.equal(clean('a\r\n\n\n\nb', 50, true), 'a\n\nb');
   assert.equal(clean('x'.repeat(10), 4), 'xxxx');
@@ -147,4 +152,36 @@ test('checkTurnstile: off without a secret, strict with one', async () => {
   assert.equal(await checkTurnstile('s3cret', 'tok', 'local', fake({ success: false, 'error-codes': ['invalid-input-response'] })), 'invalid-input-response');
   assert.equal(calls.at(-1).ip, null);
   assert.equal(await checkTurnstile('s3cret', 'tok', '1.2.3.4', async () => { throw new Error('down'); }), 'unreachable');
+});
+
+test('every other Tuesday from 1 December 2026', () => {
+  const s = { ...DEFAULT_SETTINGS, weekdays: [2], week_interval: 2, start_date: '2026-12-01' };
+  const days = [];
+  for (let d = '2026-11-01'; d <= '2027-01-31'; d = addDays(d, 1)) if (isVisitDay(d, s)) days.push(d);
+  assert.deepEqual(days, ['2026-12-01', '2026-12-15', '2026-12-29', '2027-01-12', '2027-01-26']);
+  assert.equal(mondayOf('2026-12-06'), '2026-11-30');
+  // weekly with a start date: every Tuesday from the start
+  assert.ok(isVisitDay('2026-12-08', { ...s, week_interval: 1 }));
+  assert.ok(!isVisitDay('2026-11-24', { ...s, week_interval: 1 }));
+  // no start date, weekly: unchanged behaviour
+  assert.ok(isVisitDay('2026-10-06', { ...DEFAULT_SETTINGS }));
+});
+
+test('dayBlock reports days before the start date', () => {
+  const s = { ...DEFAULT_SETTINGS, weekdays: [2], week_interval: 2, start_date: '2026-12-01' };
+  assert.equal(dayBlock('2026-11-24', s, new Map(), '2026-10-06'), 'before_start');
+  assert.equal(dayBlock('2026-12-08', s, new Map(), '2026-10-06'), 'weekday');
+  assert.equal(dayBlock('2026-12-15', s, new Map(), '2026-10-06'), '');
+});
+
+test('rhythm settings validate', () => {
+  assert.deepEqual(validateSettings({ week_interval: '2', start_date: '2026-12-01', confirm_days: 3 }).value,
+    { week_interval: 2, start_date: '2026-12-01', confirm_days: 3 });
+  assert.ok(validateSettings({ week_interval: 5 }).errors.week_interval);
+  assert.ok(validateSettings({ start_date: '2026-13-01' }).errors.start_date);
+  assert.ok(validateSettings({ confirm_days: 0 }).errors.confirm_days);
+  const base = { ...DEFAULT_SETTINGS, weekdays: [2], week_interval: 2 };
+  assert.ok(settingsComboErrors({ ...base, start_date: '' }).start_date);
+  assert.ok(settingsComboErrors({ ...base, start_date: '2026-12-02' }).start_date);
+  assert.deepEqual(settingsComboErrors({ ...base, start_date: '2026-12-01' }), {});
 });

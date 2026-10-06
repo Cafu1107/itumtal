@@ -11,6 +11,9 @@ export const DEFAULT_SETTINGS = {
   booking_open: true,
   season_end: '', // YYYY-MM-DD, empty = no end
   notice: '',
+  week_interval: 1, // 1 = every week, 2 = every other week …
+  start_date: '', // YYYY-MM-DD: first possible visit day, and the anchor week for week_interval
+  confirm_days: 3, // the tracking page asks for attendance confirmation this many days before the visit
 };
 
 export const DISTRICTS = [
@@ -51,6 +54,26 @@ export function isoWeekday(iso) {
 
 export function daysBetween(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / DAY_MS);
+}
+
+/** Monday of the ISO week that contains `iso`. */
+export function mondayOf(iso) {
+  return addDays(iso, 1 - isoWeekday(iso));
+}
+
+/**
+ * Is `iso` one of the recurring visit days? (weekday, start date and every-N-weeks rhythm;
+ * closed days, lead time and season end are checked separately in dayBlock.)
+ */
+export function isVisitDay(iso, settings) {
+  if (!settings.weekdays.includes(isoWeekday(iso))) return false;
+  if (settings.start_date && iso < settings.start_date) return false;
+  const every = settings.week_interval || 1;
+  if (every > 1 && settings.start_date) {
+    const weeks = Math.round(daysBetween(mondayOf(settings.start_date), mondayOf(iso)) / 7);
+    if (weeks % every !== 0) return false;
+  }
+  return true;
 }
 
 export function isTime(s) {
@@ -101,7 +124,34 @@ export function validateSettings(input) {
     const v = clean(input.notice, 400, true);
     out.notice = v;
   }
+  if ('week_interval' in input) {
+    const n = Number(input.week_interval);
+    if (!Number.isInteger(n) || n < 1 || n > 4) errors.week_interval = 'Her hafta ile 4 haftada bir arasında seçin.';
+    else out.week_interval = n;
+  }
+  if ('start_date' in input) {
+    const v = String(input.start_date || '');
+    if (v && !isISODate(v)) errors.start_date = 'Geçersiz tarih.';
+    else out.start_date = v;
+  }
+  if ('confirm_days' in input) {
+    const n = Number(input.confirm_days);
+    if (!Number.isInteger(n) || n < 1 || n > 14) errors.confirm_days = '1 ile 14 arasında bir sayı girin.';
+    else out.confirm_days = n;
+  }
   return { ok: Object.keys(errors).length === 0, value: out, errors };
+}
+
+/** Rules that span several settings; run on the merged result before saving. */
+export function settingsComboErrors(merged) {
+  const errors = {};
+  if (merged.week_interval > 1 && !merged.start_date) {
+    errors.start_date = 'Haftalar bu tarihten sayılacağı için birkaç haftada bir seçildiğinde başlangıç tarihi gerekli.';
+  }
+  if (merged.week_interval > 1 && merged.start_date && !merged.weekdays.includes(isoWeekday(merged.start_date))) {
+    errors.start_date = 'Başlangıç tarihi, seçili ziyaret günlerinden birine denk gelmeli.';
+  }
+  return errors;
 }
 
 // ---------- availability ----------
@@ -115,7 +165,8 @@ export function dayBlock(iso, settings, closed, today) {
   if (lead < settings.min_lead_days) return 'past';
   if (lead > settings.max_ahead_days) return 'far';
   if (settings.season_end && iso > settings.season_end) return 'season';
-  if (!settings.weekdays.includes(isoWeekday(iso))) return 'weekday';
+  if (settings.start_date && iso < settings.start_date) return 'before_start';
+  if (!isVisitDay(iso, settings)) return 'weekday';
   if (closed.has(iso)) return 'closed';
   return '';
 }
@@ -143,8 +194,12 @@ export function normalizePhone(v) {
   return /^0[2-5]\d{9}$/.test(d) ? d : null;
 }
 
+// Plain ASCII addresses only: characters like ? & , ; would let an address smuggle extra
+// recipients or headers into the panel's mailto: links.
+export const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
 export function isEmail(v) {
-  return typeof v === 'string' && v.length <= 160 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+  return typeof v === 'string' && v.length <= 160 && EMAIL_RE.test(v);
 }
 
 /**
@@ -173,7 +228,7 @@ export function validateApplication(body, settings, checkDate = () => '') {
   if (!v.phone) errors.phone = 'Geçerli bir telefon numarası yazın (örn. 0532 123 45 67).';
 
   v.email = clean(b.email, 160).toLowerCase();
-  if (!isEmail(v.email)) errors.email = 'Geçerli bir e-posta adresi yazın.';
+  if (!isEmail(v.email)) errors.email = 'Geçerli bir e-posta adresi yazın (Türkçe karakter olmadan).';
 
   v.student_count = Number(b.student_count);
   if (!Number.isInteger(v.student_count) || v.student_count < 1) errors.student_count = 'Öğrenci sayısını yazın.';

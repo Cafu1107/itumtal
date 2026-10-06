@@ -2,7 +2,7 @@
 import {
   api, $, $$, esc, icon, asset, fmtDate, fmtDateTime, relTime, fmtPhone, pill, STATUS, MONTHS, DAYS_SHORT,
   parseISO, toISO, isoWeekday, addDays, todayTR, toast, confirmDialog, setLoading, copyText, showFieldErrors,
-  bindTurnstile,
+  bindTurnstile, isVisitDay, rhythmText, nextVisitDays, daysBetween,
 } from './common.js';
 
 const TOKEN_KEY = 'itumtal.panel.token';
@@ -121,6 +121,7 @@ function renderLogin(message = '') {
       S.token = res.token;
       S.user = res.user;
       writeToken(res.token);
+      human.remove();
       start();
     } catch (err) {
       setLoading(btn, false);
@@ -154,6 +155,7 @@ async function start() {
 const NAV = [
   { id: 'basvurular', label: 'Başvurular', icon: 'inbox' },
   { id: 'takvim', label: 'Takvim', icon: 'calendar' },
+  { id: 'ziyaretler', label: 'Ziyaretler', icon: 'list' },
   { id: 'ayarlar', label: 'Ayarlar', icon: 'sliders' },
 ];
 
@@ -268,6 +270,7 @@ function go(view, id) {
 function refreshView() {
   if (S.view === 'basvurular') renderApps();
   else if (S.view === 'takvim') renderCalendar();
+  else if (S.view === 'ziyaretler') renderVisits();
   else if (S.view === 'ayarlar') renderSettings();
 }
 
@@ -331,8 +334,10 @@ function renderApps() {
         <input class="input" type="search" id="q" placeholder="Okul, öğretmen, kod, telefon veya IP" value="${esc(S.q)}" autocomplete="off">
       </label>
     </div>
+    ${followUpHTML()}
     <div id="list"></div>`;
   renderList();
+  $$('[data-open]', $('#view')).forEach((b) => b.addEventListener('click', () => go(S.view, b.dataset.open)));
 
   $$('[data-filter]').forEach((b) => b.addEventListener('click', () => {
     S.filter = b.dataset.filter;
@@ -346,6 +351,37 @@ function renderApps() {
     finally { setLoading(e.currentTarget, false); }
   });
   $('#export').addEventListener('click', exportCSV);
+}
+
+/** Approved visits whose confirmation window is open but no confirmation yet. */
+const awaitingConfirm = () => S.apps.filter((a) => a.status === 'approved' && !a.confirm_status
+  && a.visit_date >= S.today && daysBetween(S.today, a.visit_date) <= S.settings.confirm_days)
+  .sort((x, y) => x.visit_date.localeCompare(y.visit_date));
+const unmarkedPast = () => S.apps.filter((a) => a.status === 'approved' && a.visit_date < S.today && !a.attendance);
+
+function followUpHTML() {
+  const waiting = awaitingConfirm();
+  const unmarked = unmarkedPast();
+  let html = '';
+  if (waiting.length) {
+    html += `<div class="callout follow">${icon('users')}<div><b>${waiting.length} ziyaret katılım teyidi bekliyor</b>
+      <span>Teyit penceresi açık ama öğretmen henüz teyit etmedi. Açıp hazır hatırlatma mesajını gönderebilirsiniz.</span>
+      <div class="follow__list">${waiting.map((a) => `<button type="button" class="chip-btn" data-open="${a.id}">${shortDate(a.visit_date)} · ${esc(a.school_name)}</button>`).join('')}</div></div></div>`;
+  }
+  if (unmarked.length) {
+    html += `<div class="callout callout--info follow">${icon('check')}<div><b>${unmarked.length} geçmiş ziyaretin katılımı işaretlenmedi</b>
+      <span>Okulların gelip gelmediğini <a href="#/ziyaretler">Ziyaretler</a> sayfasından işaretleyebilirsiniz.</span></div></div>`;
+  }
+  return html ? `<div class="follow-wrap">${html}</div>` : '';
+}
+
+function confirmBadge(a) {
+  if (a.status !== 'approved') return '';
+  if (a.attendance === 'came') return '<span class="mini-badge mini-badge--ok">Geldi</span>';
+  if (a.attendance === 'no_show') return '<span class="mini-badge mini-badge--bad">Gelmedi</span>';
+  if (a.confirm_status === 'confirmed') return '<span class="mini-badge mini-badge--ok">Teyitli</span>';
+  if (a.visit_date >= S.today && daysBetween(S.today, a.visit_date) <= S.settings.confirm_days) return '<span class="mini-badge mini-badge--warn">Teyit bekliyor</span>';
+  return '';
 }
 
 function shortDate(iso) {
@@ -377,7 +413,7 @@ function renderList() {
         <span class="col-n cell-n">${a.student_count}</span>
         <span class="col-dates cell-dates">${dates}</span>
         <span class="col-time cell-time">${esc(relTime(a.created_at))}</span>
-        <span class="col-status">${pill(a.status)}</span>
+        <span class="col-status">${pill(a.status)}${confirmBadge(a)}</span>
       </button>`;
     }).join('')}
   </div>`;
@@ -421,9 +457,94 @@ function waLink(a) {
   return `https://wa.me/9${a.phone}?text=${encodeURIComponent(text)}`;
 }
 
+const SITE = () => new URL('../', location.href).href;
+// Rows saved before the stricter API check could still hold odd addresses; never put those in a mailto: link.
+const safeEmail = (e) => /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(String(e || ''));
+const SCHOOL_ADDRESS = 'Akat Mah. Zeytinoğlu Cad. No:80, Etiler, Beşiktaş / İstanbul';
+
+function signature() {
+  return `${S.user.display_name}\nİTÜ Mesleki ve Teknik Anadolu Lisesi\nRehberlik Servisi · 0212 261 24 20`;
+}
+
+/** Ready-to-send texts for this application, keyed by kind. The first entry is the default. */
+function messageTemplates(a) {
+  const first = a.teacher_name.trim().split(/\s+/)[0];
+  const hi = `Merhaba ${first} Hocam,`;
+  const when = a.visit_date ? `Tarih: ${fmtDate(a.visit_date, { year: true })}\nSaat: ${a.visit_time || '—'}` : '';
+  const note = (label) => (a.admin_message ? `\n${label}: ${a.admin_message}\n` : '');
+  const T = {
+    approve: {
+      label: 'Onay', subject: 'İTÜ MTAL tanıtım ziyaretiniz onaylandı',
+      text: `${hi}\n\n${a.school_name} için yaptığınız okul tanıtım ziyareti başvurusu onaylandı. Sizi ve öğrencilerinizi okulumuzda ağırlamaktan mutluluk duyacağız.\n\n${when}\nÖğrenci sayısı: ${a.student_count}\nAdres: ${SCHOOL_ADDRESS}\n${note('Not')}\nZiyaretinizden ${S.settings.confirm_days} gün önce, ${a.visit_date ? fmtDate(addDays(a.visit_date, -S.settings.confirm_days), { weekday: false }) : ''} tarihinden itibaren aşağıdaki bağlantıdan katılımınızı ve kesin öğrenci sayısını teyit etmenizi rica ederiz:\n${trackLink(a)}\n\nToplu taşımayla ulaşım: ${SITE()}#nasil-gelirim\n\nGörüşmek üzere,\n${signature()}`,
+    },
+    reminder: {
+      label: 'Teyit hatırlatma', subject: 'İTÜ MTAL tanıtım ziyareti: katılım teyidi',
+      text: `${hi}\n\n${a.school_name} olarak okulumuza yapacağınız tanıtım ziyareti yaklaşıyor.\n\n${when}\n\nKatılımınızı ve gelecek öğrenci sayısını aşağıdaki bağlantıdan teyit edebilir misiniz? Gelemeyecekseniz aynı bağlantıdan iptal edebilirsiniz; böylece yeriniz başka okullara açılır.\n${trackLink(a)}\n\nTeşekkürler,\n${signature()}`,
+    },
+    reject: {
+      label: 'Red', subject: 'İTÜ MTAL tanıtım ziyareti başvurunuz hakkında',
+      text: `${hi}\n\n${a.school_name} için yaptığınız okul tanıtım ziyareti başvurusunu (${a.code}) bu kez karşılayamıyoruz.\n${note('Gerekçe')}\nİlginiz için teşekkür ederiz. Uygun başka günler için yeniden başvurabilirsiniz:\n${SITE()}basvuru.html\n\nSaygılarımızla,\n${signature()}`,
+    },
+    cancel: {
+      label: 'İptal', subject: 'İTÜ MTAL tanıtım ziyaretiniz iptal edildi',
+      text: `${hi}\n\n${a.visit_date ? `${fmtDate(a.visit_date, { year: true })} tarihinde planlanan ` : ''}${a.school_name} okul tanıtım ziyaretiniz iptal edilmiştir.\n${note('Açıklama')}\nYeni bir tarih için yeniden başvurabilirsiniz:\n${SITE()}basvuru.html\n\nAnlayışınız için teşekkür ederiz.\n${signature()}`,
+    },
+    contact: {
+      label: 'Görüşme', subject: 'İTÜ MTAL tanıtım ziyareti başvurunuz hakkında',
+      text: `${hi}\n\n${a.school_name} için yaptığınız okul tanıtım ziyareti başvurusunu (${a.code}) aldık. Ziyaret gününü ve saatini netleştirmek için sizinle görüşmek istiyoruz. Uygun olduğunuz bir zamanda bize dönebilir misiniz?\n\nSaygılarımızla,\n${signature()}`,
+    },
+  };
+  const kinds = [];
+  if (a.status === 'approved') {
+    const remind = !a.confirm_status && a.visit_date >= S.today;
+    const windowOpen = remind && daysBetween(S.today, a.visit_date) <= S.settings.confirm_days;
+    kinds.push(...(windowOpen ? ['reminder', 'approve'] : remind ? ['approve', 'reminder'] : ['approve']));
+  } else if (a.status === 'rejected') kinds.push('reject');
+  else if (a.status === 'cancelled') kinds.push('cancel');
+  else kinds.push('contact');
+  return kinds.map((k) => ({ kind: k, ...T[k] }));
+}
+
+function messageBoxHTML(a) {
+  const list = messageTemplates(a);
+  const cur = list[0];
+  return `
+    <section class="box msgbox" id="msgbox">
+      <h3>Öğretmene hazır mesaj</h3>
+      ${list.length > 1 ? `<div class="seg msgbox__kinds">${list.map((t, i) => `<input type="radio" name="msgkind" id="mk${i}" value="${t.kind}" ${i === 0 ? 'checked' : ''}><label for="mk${i}">${t.label}</label>`).join('')}</div>` : ''}
+      <label class="visually-hidden" for="msg-text">Mesaj metni</label>
+      <textarea class="textarea msgbox__text" id="msg-text" rows="12">${esc(cur.text)}</textarea>
+      <p class="hint">Metni göndermeden önce düzenleyebilirsiniz.</p>
+      <div class="btn-row">
+        <button class="btn btn--primary btn--sm" type="button" id="msg-copy">${icon('copy')}Kopyala</button>
+        ${/^05\d{9}$/.test(a.phone) ? `<button class="btn btn--sm btn--wa" type="button" id="msg-wa">${icon('message')}WhatsApp'ta aç</button>` : ''}
+        <button class="btn btn--sm" type="button" id="msg-mail">${icon('mail')}E-postada aç</button>
+      </div>
+    </section>`;
+}
+
+function wireMessageBox(a) {
+  const box = $('#msgbox');
+  if (!box) return;
+  const list = messageTemplates(a);
+  const text = $('#msg-text', box);
+  const current = () => list.find((t) => t.kind === ($('input[name="msgkind"]:checked', box)?.value || list[0].kind));
+  $$('input[name="msgkind"]', box).forEach((r) => r.addEventListener('change', () => { text.value = current().text; }));
+  $('#msg-copy', box).addEventListener('click', async () => {
+    if (await copyText(text.value)) toast('Mesaj kopyalandı.');
+  });
+  $('#msg-wa', box)?.addEventListener('click', () => {
+    window.open(`https://wa.me/9${a.phone}?text=${encodeURIComponent(text.value)}`, '_blank', 'noopener');
+  });
+  $('#msg-mail', box).addEventListener('click', () => {
+    if (!safeEmail(a.email)) { toast('Bu başvurudaki e-posta adresi geçersiz; mesajı kopyalayıp elle gönderin.', { type: 'bad' }); return; }
+    location.href = `mailto:${a.email}?subject=${encodeURIComponent(current().subject)}&body=${encodeURIComponent(text.value)}`;
+  });
+}
+
 function mailLink(a) {
   const subject = `İTÜ MTAL tanıtım ziyareti (${a.code})`;
-  return `mailto:${a.email}?subject=${encodeURIComponent(subject)}`;
+  return safeEmail(a.email) ? `mailto:${a.email}?subject=${encodeURIComponent(subject)}` : '#';
 }
 
 async function openDrawer(id) {
@@ -478,6 +599,7 @@ document.addEventListener('keydown', (e) => {
 const EVENT_TEXT = {
   created: 'Başvuru yapıldı', approved: 'Onaylandı', rescheduled: 'Tarih değiştirildi', rejected: 'Reddedildi',
   cancelled: 'İptal edildi', reopened: 'Yeniden değerlendirmeye alındı',
+  confirmed: 'Katılım teyit edildi', unconfirmed: 'Teyit kaldırıldı', attendance: 'Katılım işaretlendi',
 };
 
 function meterHTML(used, add, cap) {
@@ -492,7 +614,7 @@ function meterHTML(used, add, cap) {
 function dayWarning(date) {
   const closed = closedMap();
   if (closed.has(date)) return `Bu gün ziyarete kapalı olarak işaretli${closed.get(date) ? ` (${closed.get(date)})` : ''}.`;
-  if (!S.settings.weekdays.includes(isoWeekday(date))) return 'Bu gün normalde ziyaret kabul edilen günlerden değil.';
+  if (!isVisitDay(date, S.settings)) return `Bu gün ziyaret takviminde yok (${rhythmText(S.settings).toLocaleLowerCase('tr')}).`;
   if (date < S.today) return 'Bu tarih geçmişte kaldı.';
   return '';
 }
@@ -533,6 +655,31 @@ function planForm(a) {
     </form>`;
 }
 
+function confirmBlockHTML(a) {
+  const left = daysBetween(S.today, a.visit_date);
+  const from = addDays(a.visit_date, -S.settings.confirm_days);
+  let status;
+  if (a.confirm_status === 'confirmed') {
+    status = `<div class="state state--ok">${icon('check')}<div><b>Katılım teyit edildi · ${a.student_count} öğrenci</b><span>${a.confirmed_by === 'öğretmen' ? 'Öğretmen takip sayfasından teyit etti' : `Panelden işaretlendi (${esc(a.confirmed_by || '')})`} · ${esc(relTime(a.confirmed_at))}</span></div></div>`;
+  } else if (left < 0) {
+    status = `<div class="state">${icon('info')}<div><b>Teyit alınmadı</b><span>Ziyaret tarihi geçti.</span></div></div>`;
+  } else if (left <= S.settings.confirm_days) {
+    status = `<div class="state state--warn">${icon('clock')}<div><b>Teyit bekleniyor</b><span>Öğretmen takip sayfasından teyit edebilir. Hatırlatma mesajı aşağıda hazır.</span></div></div>`;
+  } else {
+    status = `<div class="state">${icon('clock')}<div><b>Teyit henüz açılmadı</b><span>${esc(fmtDate(from, { weekday: false }))} tarihinde takip sayfasında açılacak.</span></div></div>`;
+  }
+  const buttons = a.confirm_status === 'confirmed'
+    ? `<button class="btn btn--sm btn--ghost" type="button" id="do-unconfirm">${icon('rotate')}Teyidi kaldır</button>`
+    : (left >= 0 ? `<button class="btn btn--sm" type="button" id="do-confirm">${icon('phone')}Telefonla teyit edildi</button>` : '');
+  const attendance = left <= 0 ? `
+    <div class="att" role="group" aria-label="Katılım">
+      <span class="att__label">Katılım:</span>
+      <button class="att__btn att__btn--came" type="button" data-att="came" aria-pressed="${a.attendance === 'came'}">${icon('check')}Geldi</button>
+      <button class="att__btn att__btn--no" type="button" data-att="no_show" aria-pressed="${a.attendance === 'no_show'}">${icon('x')}Gelmedi</button>
+    </div>` : '';
+  return `<section class="box"><h3>Katılım teyidi</h3>${status}${buttons ? `<div class="btn-row" style="margin-top:12px">${buttons}</div>` : ''}${attendance}</section>`;
+}
+
 function renderDrawer(a, events, { keepScroll = false } = {}) {
   const drawer = $('#drawer');
   const prevScroll = keepScroll ? $('.drawer__body', drawer)?.scrollTop : 0;
@@ -563,7 +710,8 @@ function renderDrawer(a, events, { keepScroll = false } = {}) {
           <button class="btn btn--sm btn--danger" type="button" id="do-cancel">${icon('ban')}Ziyareti iptal et</button>
         </div>
         <div id="plan-wrap" hidden style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">${planForm(a)}</div>
-      </section>`;
+      </section>
+      ${confirmBlockHTML(a)}`;
   } else {
     statusBlock = `
       <section class="box">
@@ -604,6 +752,8 @@ function renderDrawer(a, events, { keepScroll = false } = {}) {
       ${a.note ? `<div class="message-box" style="background:var(--card)"><small>Öğretmenin notu</small>${esc(a.note)}</div>` : ''}
 
       ${statusBlock}
+
+      ${messageBoxHTML(a)}
 
       <section class="box">
         <h3>Tercih edilen günler</h3>
@@ -678,6 +828,23 @@ function wireDrawer(a) {
     if (ok) act(a, { action: 'cancel' }, e.currentTarget, 'Ziyaret iptal edildi.');
   });
   $('#do-reopen')?.addEventListener('click', (e) => act(a, { action: 'reopen' }, e.currentTarget, 'Başvuru yeniden beklemeye alındı.'));
+  $('#do-unconfirm')?.addEventListener('click', (e) => act(a, { action: 'unconfirm' }, e.currentTarget, 'Teyit kaldırıldı.'));
+  $('#do-confirm')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const vals = await promptDialog({
+      title: 'Katılım teyit edildi olarak işaretlensin mi?',
+      text: 'Öğretmenle telefonda görüştüyseniz kesin öğrenci sayısını yazın.',
+      fields: [{ name: 'student_count', label: 'Gelecek öğrenci sayısı', type: 'number', value: String(a.student_count) }],
+      ok: 'Teyit edildi',
+      validate: (v) => (Number.isInteger(Number(v.student_count)) && Number(v.student_count) > 0 ? '' : 'Geçerli bir öğrenci sayısı yazın.'),
+    });
+    if (vals) act(a, { action: 'confirm', student_count: Number(vals.student_count) }, btn, 'Katılım teyit edildi.');
+  });
+  $$('[data-att]', $('#drawer')).forEach((b) => b.addEventListener('click', () => {
+    const next = b.getAttribute('aria-pressed') === 'true' ? '' : b.dataset.att;
+    act(a, { action: 'attendance', attendance: next }, b, next === 'came' ? 'Geldi olarak işaretlendi.' : next === 'no_show' ? 'Gelmedi olarak işaretlendi.' : 'Katılım işareti kaldırıldı.');
+  }));
+  wireMessageBox(a);
 
   const note = $('#internal_note');
   let saved = note.value;
@@ -801,10 +968,14 @@ async function act(a, body, btn, okMsg, form) {
     renderDrawer(merged, res.events);
     if (S.view === 'basvurular') renderApps();
     else if (S.view === 'takvim') renderCalendar();
-    if (body.action === 'approve' && waLink(merged)) {
-      // offer the ready-made WhatsApp message right away
-      const wa = $('.btn--wa');
-      wa?.classList.add('btn--signal');
+    else if (S.view === 'ziyaretler') renderVisits();
+    if (['approve', 'reject', 'cancel'].includes(body.action)) {
+      // the matching ready-made message is the next thing to do: bring it into view
+      const box = $('#msgbox');
+      if (box) {
+        box.classList.add('is-fresh');
+        box.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+      }
     }
   } catch (err) {
     if (err.data?.fields && form) showFieldErrors(form, err.data.fields);
@@ -882,7 +1053,7 @@ function renderCalendar() {
     const used = visits.reduce((n, a) => n + a.student_count, 0);
     const req = reqBy.get(d) || 0;
     const isClosed = closed.has(d);
-    const off = !S.settings.weekdays.includes(isoWeekday(d));
+    const off = !isVisitDay(d, S.settings);
     const cls = ['mday', other ? 'mday--other' : '', off ? 'mday--off' : '', isClosed ? 'mday--closed' : '', d === S.today ? 'is-today' : '', d === S.selDay ? 'is-selected' : ''].join(' ');
     const label = `${fmtDate(d)}${visits.length ? `, ${visits.length} ziyaret, ${used} öğrenci` : ''}${req ? `, ${req} bekleyen talep` : ''}${isClosed ? ', kapalı' : ''}`;
     cells += `<button type="button" class="${cls}" data-day="${d}" aria-label="${esc(label)}" aria-pressed="${d === S.selDay}">
@@ -993,6 +1164,192 @@ function renderDayPanel(visitsBy) {
   });
 }
 
+// ---------- visits view (eğitim yılı, month by month) ----------
+
+const MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
+const eduYearOf = (iso) => { const { y, m } = parseISO(iso); return m >= 9 ? y : y - 1; };
+const eduLabel = (y) => `${y}–${y + 1}`;
+
+function visitsOfYear(y) {
+  return S.apps.filter((a) => a.status === 'approved' && a.visit_date && eduYearOf(a.visit_date) === y)
+    .sort((p, q) => `${p.visit_date} ${p.visit_time}`.localeCompare(`${q.visit_date} ${q.visit_time}`));
+}
+
+function renderVisits() {
+  const years = [...new Set([eduYearOf(S.today), ...S.apps.filter((a) => a.status === 'approved' && a.visit_date).map((a) => eduYearOf(a.visit_date))])].sort((a, b) => b - a);
+  if (!years.includes(S.eduYear)) S.eduYear = eduYearOf(S.today);
+  const list = visitsOfYear(S.eduYear);
+  const past = list.filter((a) => a.visit_date <= S.today);
+  const came = list.filter((a) => a.attendance === 'came');
+  const noShow = list.filter((a) => a.attendance === 'no_show');
+  const sum = (arr) => arr.reduce((n, a) => n + a.student_count, 0);
+
+  const months = MONTH_ORDER.map((m) => {
+    const y = m >= 9 ? S.eduYear : S.eduYear + 1;
+    return { y, m, rows: list.filter((a) => parseISO(a.visit_date).m === m) };
+  });
+  const filled = months.filter((x) => x.rows.length);
+
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div><h1>Ziyaretler</h1><p>Onaylanan tanıtım ziyaretleri, eğitim öğretim yılına göre ay ay. Excel'e yalnızca "Geldi" olarak işaretlenen okullar yazılır.</p></div>
+      <div class="view-head__actions">
+        <label class="visually-hidden" for="edu-year">Eğitim öğretim yılı</label>
+        <select class="select" id="edu-year" style="min-height:40px;width:auto">${years.map((y) => `<option value="${y}" ${y === S.eduYear ? 'selected' : ''}>${eduLabel(y)}</option>`).join('')}</select>
+        <button class="btn btn--primary btn--sm" type="button" id="xlsx" title="Excel'e yalnızca &quot;Geldi&quot; olarak işaretlenen okullar yazılır.">${icon('download')}Gelen okullar · Excel (${eduLabel(S.eduYear)})</button>
+      </div>
+    </div>
+    <div class="tiles">
+      <div class="tile-stat"><b>${list.length}</b><span>Onaylı ziyaret</span></div>
+      <div class="tile-stat"><b>${sum(list)}</b><span>Öğrenci</span></div>
+      <div class="tile-stat tile-stat--ok"><b>${came.length}</b><span>Geldi (${sum(came)} öğrenci)</span></div>
+      <div class="tile-stat tile-stat--bad"><b>${noShow.length}</b><span>Gelmedi</span></div>
+      <div class="tile-stat"><b>${past.filter((a) => !a.attendance).length}</b><span>İşaretlenmemiş</span></div>
+    </div>
+    ${filled.length ? filled.map(({ y, m, rows }) => `
+      <section class="month">
+        <h2 class="month__title">${MONTHS[m - 1]} ${y}<span>${rows.length} ziyaret · ${sum(rows)} öğrenci</span></h2>
+        <div class="vlist">
+          ${rows.map((a) => {
+            const isPast = a.visit_date <= S.today;
+            return `<div class="vrow">
+              <span class="vrow__date"><b>${shortDate(a.visit_date)}</b><small>${esc(a.visit_time)}</small></span>
+              <button type="button" class="vrow__school" data-open="${a.id}"><b>${esc(a.school_name)}</b><small>${esc(a.district)} · ${esc(a.teacher_name)} · ${esc(fmtPhone(a.phone))}</small></button>
+              <span class="vrow__n">${a.student_count}<small> öğr.</small></span>
+              <span class="vrow__confirm">${a.confirm_status === 'confirmed' ? '<span class="mini-badge mini-badge--ok">Teyitli</span>' : '<span class="mini-badge">Teyitsiz</span>'}</span>
+              <span class="vrow__att">${isPast ? `
+                <span class="att att--compact" role="group" aria-label="${esc(a.school_name)} katılım">
+                  <button class="att__btn att__btn--came" type="button" data-att-id="${a.id}" data-att="came" aria-pressed="${a.attendance === 'came'}">${icon('check')}Geldi</button>
+                  <button class="att__btn att__btn--no" type="button" data-att-id="${a.id}" data-att="no_show" aria-pressed="${a.attendance === 'no_show'}">${icon('x')}Gelmedi</button>
+                </span>` : '<span class="hint">Yaklaşıyor</span>'}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </section>`).join('') : `<div class="list"><div class="empty">${icon('calendar')}<b>${eduLabel(S.eduYear)} için onaylanmış ziyaret yok.</b>Ziyaretler onaylandıkça burada ay ay listelenir.</div></div>`}`;
+
+  $('#edu-year').addEventListener('change', (e) => { S.eduYear = Number(e.target.value); renderVisits(); });
+  $('#xlsx').addEventListener('click', (e) => exportYear(e.currentTarget, S.eduYear));
+  $$('[data-open]', $('#view')).forEach((b) => b.addEventListener('click', () => go('ziyaretler', b.dataset.open)));
+  $$('[data-att-id]', $('#view')).forEach((b) => b.addEventListener('click', async () => {
+    const id = Number(b.dataset.attId);
+    const next = b.getAttribute('aria-pressed') === 'true' ? '' : b.dataset.att;
+    b.disabled = true;
+    try {
+      const res = await authed(`/api/admin/applications/${id}`, { method: 'PATCH', body: { action: 'attendance', attendance: next } });
+      upsertApp(res.application);
+      renderVisits();
+    } catch (err) {
+      b.disabled = false;
+      toast(err.message, { type: 'bad' });
+    }
+  }));
+}
+
+let excelReady;
+function loadExcelJS() {
+  excelReady ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    s.integrity = 'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz';
+    s.crossOrigin = 'anonymous';
+    s.onload = () => resolve(window.ExcelJS);
+    s.onerror = () => { excelReady = null; reject(new Error('Excel aracı yüklenemedi. İnternet bağlantınızı kontrol edin.')); };
+    document.head.append(s);
+  });
+  return excelReady;
+}
+
+async function exportYear(btn, y) {
+  setLoading(btn, true);
+  try {
+    const ExcelJS = await loadExcelJS();
+    // Only schools marked "Geldi" go into the yearly file.
+    const list = visitsOfYear(y).filter((a) => a.attendance === 'came');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'İTÜ MTAL Rehberlik Paneli';
+    wb.created = new Date();
+    const NAVY = 'FF152340';
+    const head = (row) => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
+      row.alignment = { vertical: 'middle' };
+      row.height = 20;
+    };
+    const totalRow = (ws, values) => {
+      const t = ws.addRow(values);
+      t.font = { bold: true };
+      t.border = { top: { style: 'thin' } };
+    };
+    const muted = { italic: true, color: { argb: 'FF5C6479' } };
+
+    // Özet: one line per month
+    const sum = wb.addWorksheet('Özet', { views: [{ state: 'frozen', ySplit: 4 }] });
+    sum.columns = [{ width: 18 }, { width: 13 }, { width: 11 }];
+    sum.addRow([`İTÜ MTAL tanıtım ziyaretine gelen okullar · ${eduLabel(y)} eğitim öğretim yılı`]).font = { bold: true, size: 14 };
+    sum.addRow([`Oluşturulma: ${fmtDateTime(new Date().toISOString())} · ${S.user.display_name}`]).font = muted;
+    sum.addRow(['Yalnızca panelde "Geldi" olarak işaretlenen ziyaretler yer alır.']).font = muted;
+    head(sum.addRow(['Ay', 'Gelen okul', 'Öğrenci']));
+    const totals = [0, 0];
+    for (const m of MONTH_ORDER) {
+      const yy = m >= 9 ? y : y + 1;
+      const rows = list.filter((a) => parseISO(a.visit_date).m === m);
+      const r = [rows.length, rows.reduce((n, a) => n + a.student_count, 0)];
+      r.forEach((v, i) => { totals[i] += v; });
+      sum.addRow([`${MONTHS[m - 1]} ${yy}`, ...r]);
+    }
+    totalRow(sum, ['Toplam', ...totals]);
+
+    // one sheet per month: the schools that came, with date and head count
+    const cols = [
+      { header: 'Tarih', key: 'date', width: 12, style: { numFmt: 'dd.mm.yyyy' } },
+      { header: 'Saat', key: 'time', width: 8 },
+      { header: 'Okulun adı', key: 'school', width: 38 },
+      { header: 'İlçe', key: 'district', width: 14 },
+      { header: 'Öğrenci sayısı', key: 'n', width: 15 },
+      { header: 'Kod', key: 'code', width: 10 },
+    ];
+    for (const m of MONTH_ORDER) {
+      const yy = m >= 9 ? y : y + 1;
+      const ws = wb.addWorksheet(`${MONTHS[m - 1]} ${yy}`, { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.columns = cols;
+      head(ws.getRow(1));
+      const rows = list.filter((a) => parseISO(a.visit_date).m === m);
+      if (!rows.length) {
+        ws.addRow({ school: 'Bu ay gelen okul yok.' }).font = muted;
+        continue;
+      }
+      for (const a of rows) {
+        const { y: dy, m: dm, d } = parseISO(a.visit_date);
+        ws.addRow({
+          date: new Date(Date.UTC(dy, dm - 1, d)),
+          time: a.visit_time,
+          school: a.school_name,
+          district: a.district,
+          n: a.student_count,
+          code: a.code,
+        });
+      }
+      totalRow(ws, { school: `Toplam: ${rows.length} okul`, n: rows.reduce((n, a) => n + a.student_count, 0) });
+      ws.autoFilter = { from: 'A1', to: `F${rows.length + 1}` };
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ITU-MTAL-gelen-okullar-${y}-${y + 1}.xlsx`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(list.length ? `Excel indirildi: ${list.length} okul.` : 'Excel indirildi; bu yıl henüz "Geldi" olarak işaretlenen okul yok.');
+  } catch (err) {
+    toast(err.message, { type: 'bad' });
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
 // ---------- settings view ----------
 
 const WEEKDAY_NAMES = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
@@ -1033,6 +1390,22 @@ function renderSettings() {
           </fieldset>
           <div class="grid-2" style="margin-top:18px">
             <div class="field">
+              <label class="label" for="week_interval">Sıklık</label>
+              <select class="select" id="week_interval" name="week_interval">
+                ${[[1, 'Her hafta'], [2, '2 haftada bir'], [3, '3 haftada bir'], [4, '4 haftada bir']].map(([v, l]) => `<option value="${v}" ${s.week_interval === v ? 'selected' : ''}>${l}</option>`).join('')}
+              </select>
+              <p class="error-text" data-error-for="week_interval"></p>
+            </div>
+            <div class="field">
+              <label class="label" for="start_date">Başlangıç tarihi</label>
+              <input class="input" type="date" id="start_date" name="start_date" value="${esc(s.start_date)}">
+              <p class="error-text" data-error-for="start_date"></p>
+            </div>
+            <p class="hint span-2" style="margin-top:-8px">İlk ziyaret günü. Birkaç haftada bir seçildiğinde haftalar bu tarihten sayılır.</p>
+            <div class="rhythm-preview span-2" id="rhythm-preview" aria-live="polite"></div>
+          </div>
+          <div class="grid-2" style="margin-top:18px">
+            <div class="field">
               <label class="label" for="min_lead_days">En az kaç gün önceden</label>
               <input class="input" type="number" inputmode="numeric" id="min_lead_days" name="min_lead_days" min="0" max="60" value="${s.min_lead_days}">
               <p class="error-text" data-error-for="min_lead_days"></p>
@@ -1042,7 +1415,12 @@ function renderSettings() {
               <input class="input" type="number" inputmode="numeric" id="max_ahead_days" name="max_ahead_days" min="7" max="400" value="${s.max_ahead_days}">
               <p class="error-text" data-error-for="max_ahead_days"></p>
             </div>
-            <div class="field span-2">
+            <div class="field">
+              <label class="label" for="confirm_days">Katılım teyidi kaç gün önce açılsın</label>
+              <input class="input" type="number" inputmode="numeric" id="confirm_days" name="confirm_days" min="1" max="14" value="${s.confirm_days}">
+              <p class="error-text" data-error-for="confirm_days"></p>
+            </div>
+            <div class="field">
               <label class="label" for="season_end">Tanıtım döneminin son günü <span class="opt">(isteğe bağlı)</span></label>
               <input class="input" type="date" id="season_end" name="season_end" value="${esc(s.season_end)}" style="max-width:220px">
               <p class="error-text" data-error-for="season_end"></p>
@@ -1106,6 +1484,24 @@ function renderSettings() {
 
   renderClosedList();
   renderBlockedList();
+  const preview = () => {
+    const form = $('#cap-form');
+    const draft = {
+      weekdays: $$('.weekdays input:checked', form).map((i) => Number(i.value)),
+      week_interval: Number($('#week_interval').value),
+      start_date: $('#start_date').value,
+    };
+    const box = $('#rhythm-preview');
+    if (!draft.weekdays.length) { box.innerHTML = '<span class="hint">En az bir gün seçin.</span>'; return; }
+    const from = draft.start_date && draft.start_date > S.today ? draft.start_date : S.today;
+    const closed = closedMap();
+    const days = nextVisitDays(draft, from, 8);
+    box.innerHTML = `<b>${esc(rhythmText(draft))}</b> · sonraki ziyaret günleri:
+      <span class="rhythm-preview__days">${days.map((d) => `<span class="${closed.has(d) ? 'is-closed' : ''}" title="${closed.has(d) ? 'Kapalı gün' : ''}">${shortDate(d)}</span>`).join('')}</span>`;
+  };
+  $('#cap-form').addEventListener('input', preview);
+  $('#cap-form').addEventListener('change', preview);
+  preview();
   if (isAdmin) loadUsers();
 
   $('#block-form').addEventListener('submit', async (e) => {
@@ -1149,7 +1545,11 @@ function renderSettings() {
       min_lead_days: Number($('#min_lead_days').value),
       max_ahead_days: Number($('#max_ahead_days').value),
       season_end: $('#season_end').value,
+      week_interval: Number($('#week_interval').value),
+      start_date: $('#start_date').value,
+      confirm_days: Number($('#confirm_days').value),
     };
+    if (body.week_interval > 1 && !body.start_date) { showFieldErrors(form, { start_date: 'Birkaç haftada bir seçildiğinde başlangıç tarihi gerekli.' })?.focus(); return; }
     if (!body.weekdays.length) { showFieldErrors(form, { weekdays: 'En az bir gün seçin.' }); return; }
     const btn = form.querySelector('[type=submit]');
     setLoading(btn, true);

@@ -17,7 +17,7 @@ import {
   STATUSES, DISTRICTS, GRADES, TIME_PREFS, ROLES_TEACHER,
   todayTR, isISODate, addDays, isTime, parseSettings, validateSettings, dayBlock, remainingFor,
   validateApplication, clean, randomCode, randomToken, sha256, hashPassword, verifyPassword,
-  validatePassword, toCSV, checkTurnstile,
+  validatePassword, toCSV, checkTurnstile, settingsComboErrors, daysBetween,
 } from './lib.mjs';
 
 const SESSION_HOURS = 12;
@@ -30,6 +30,7 @@ const LOCK_AFTER_FAILS = 5;
 const LOCK_MINUTES = 15;
 
 const BLOCK_MESSAGES = {
+  before_start: 'Tanıtım ziyaretleri bu tarihten sonra başlıyor.',
   past: 'Bu tarih için başvuru süresi geçti.',
   far: 'Bu tarih henüz başvuruya açık değil.',
   season: 'Bu tarih tanıtım dönemi dışında.',
@@ -86,6 +87,10 @@ async function route(request, env, ctx) {
     await limit(env.LIMIT_READ, request, 'read', 120);
     return trackApplication(env, mm[1]);
   }
+  if ((mm = p.match(/^\/api\/track\/([A-Za-z0-9_-]{20,64})\/confirm$/)) && m === 'POST') {
+    await limit(env.LIMIT_WRITE, request, 'write', 10);
+    return teacherConfirm(request, env, mm[1]);
+  }
   if ((mm = p.match(/^\/api\/track\/([A-Za-z0-9_-]{20,64})\/cancel$/)) && m === 'POST') {
     await limit(env.LIMIT_WRITE, request, 'write', 10);
     return teacherCancel(env, mm[1]);
@@ -118,7 +123,7 @@ async function route(request, env, ctx) {
   if (p === '/api/admin/closed-days' && m === 'POST') return addClosedDay(request, env);
   if (p === '/api/admin/blocked-ips' && m === 'GET') return listBlocked(env);
   if (p === '/api/admin/blocked-ips' && m === 'POST') return blockIP(request, env, user);
-  if ((mm = p.match(/^\/api\/admin\/blocked-ips\/([^/]{2,140})$/)) && m === 'DELETE') return unblockIP(env, decodeURIComponent(mm[1]));
+  if ((mm = p.match(/^\/api\/admin\/blocked-ips\/([^/]{2,140})$/)) && m === 'DELETE') return unblockIP(env, safeDecode(mm[1]));
   if ((mm = p.match(/^\/api\/admin\/closed-days\/(\d{4}-\d{2}-\d{2})$/)) && m === 'DELETE') return removeClosedDay(env, mm[1]);
 
   if (p.startsWith('/api/admin/users')) {
@@ -163,6 +168,9 @@ async function readJSON(request, maxBytes = 16384) {
 }
 
 const nowISO = () => new Date().toISOString();
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch { throw new HttpError(400, 'Geçersiz istek.'); }
+}
 const clientIP = (request) => request.headers.get('CF-Connecting-IP') || 'local';
 
 // Cloudflare rate-limit bindings when present, plus a per-isolate fallback counter.
@@ -218,7 +226,8 @@ async function getConfig(env) {
   const settings = await loadSettings(env);
   const closed = await loadClosed(env);
   const today = todayTR();
-  const from = addDays(today, settings.min_lead_days);
+  const earliest = addDays(today, settings.min_lead_days);
+  const from = settings.start_date && settings.start_date > earliest ? settings.start_date : earliest;
   const to = addDays(today, settings.max_ahead_days);
   const used = await loadUsed(env, from, to);
   const days = {};
@@ -231,6 +240,9 @@ async function getConfig(env) {
     booking_open: settings.booking_open,
     daily_capacity: settings.daily_capacity,
     weekdays: settings.weekdays,
+    week_interval: settings.week_interval,
+    start_date: settings.start_date,
+    confirm_days: settings.confirm_days,
     first_day: from,
     last_day: settings.season_end && settings.season_end < to ? settings.season_end : to,
     notice: settings.notice,
@@ -356,7 +368,44 @@ async function trackApplication(env, token) {
     created_at: r.created_at,
     updated_at: r.updated_at,
     can_cancel: r.status === 'pending' || (r.status === 'approved' && r.visit_date >= today),
+    ...(await confirmInfo(env, r, today)),
   });
+}
+
+/** Attendance-confirmation state shown on the tracking page. */
+async function confirmInfo(env, r, today) {
+  if (r.status !== 'approved') return { confirm_status: r.confirm_status || '' };
+  const settings = await loadSettings(env);
+  const left = daysBetween(today, r.visit_date);
+  return {
+    confirm_status: r.confirm_status || '',
+    confirmed_at: r.confirmed_at,
+    confirm_from: addDays(r.visit_date, -settings.confirm_days),
+    confirm_open: left >= 0 && left <= settings.confirm_days,
+  };
+}
+
+async function teacherConfirm(request, env, token) {
+  const body = await readJSON(request, 2048);
+  const r = await findByToken(env, token);
+  if (r.status !== 'approved') throw new HttpError(409, 'Yalnızca onaylanmış ziyaretler teyit edilebilir.');
+  const today = todayTR();
+  const info = await confirmInfo(env, r, today);
+  if (!info.confirm_open) {
+    throw new HttpError(409, r.visit_date < today ? 'Ziyaret tarihi geçti.' : `Katılım teyidi ${formatDateTR(info.confirm_from)} tarihinde açılacak.`);
+  }
+  const n = Number(body.student_count);
+  if (!Number.isInteger(n) || n < 1) throw new HttpError(422, 'Gelecek öğrenci sayısını yazın.', { fields: { student_count: 'Gelecek öğrenci sayısını yazın.' } });
+  if (n > r.student_count) {
+    const msg = `Onaylanan sayı ${r.student_count}. Daha kalabalık gelecekseniz lütfen okulu arayın.`;
+    throw new HttpError(422, msg, { fields: { student_count: msg } });
+  }
+  const now = nowISO();
+  await env.DB.prepare(
+    "UPDATE applications SET confirm_status = 'confirmed', confirmed_at = ?1, confirmed_by = 'öğretmen', student_count = ?2, updated_at = ?1 WHERE id = ?3",
+  ).bind(now, n, r.id).run();
+  await logEvent(env, r.id, 'öğretmen', 'confirmed', n === r.student_count ? `${n} öğrenci` : `${r.student_count} → ${n} öğrenci`);
+  return trackApplication(env, token);
 }
 
 async function teacherCancel(env, token) {
@@ -460,7 +509,8 @@ async function listApplications(env) {
   const { results } = await env.DB.prepare(
     `SELECT id, code, token, ip, status, school_name, district, teacher_name, teacher_role, phone, email, student_count,
             escort_count, grade, time_pref, preferred_dates, note, visit_date, visit_time, admin_message,
-            internal_note, cancelled_by, created_at, updated_at
+            internal_note, cancelled_by, created_at, updated_at,
+            confirm_status, confirmed_at, confirmed_by, attendance, attendance_at
      FROM applications ORDER BY created_at DESC LIMIT 5000`,
   ).all();
   return json({ applications: results.map(rowToApp), today: todayTR() });
@@ -497,10 +547,16 @@ async function updateApplication(request, env, user, id) {
       });
     }
     const message = clean(body.admin_message ?? r.admin_message, 600, true);
+    const sameDay = r.status === 'approved' && r.visit_date === date;
     await env.DB.prepare(
       `UPDATE applications SET status = 'approved', visit_date = ?1, visit_time = ?2, admin_message = ?3,
-       cancelled_by = NULL, updated_at = ?4 WHERE id = ?5`,
-    ).bind(date, time, message, now, id).run();
+       cancelled_by = NULL, updated_at = ?4,
+       confirm_status = CASE WHEN ?6 THEN confirm_status ELSE '' END,
+       confirmed_at = CASE WHEN ?6 THEN confirmed_at ELSE NULL END,
+       confirmed_by = CASE WHEN ?6 THEN confirmed_by ELSE NULL END,
+       attendance = CASE WHEN ?6 THEN attendance ELSE '' END
+       WHERE id = ?5`,
+    ).bind(date, time, message, now, id, sameDay ? 1 : 0).run();
     await logEvent(env, id, actor, r.status === 'approved' ? 'rescheduled' : 'approved', `${date} ${time}`);
   } else if (action === 'reject') {
     const message = clean(body.admin_message ?? '', 600, true);
@@ -516,9 +572,31 @@ async function updateApplication(request, env, user, id) {
     await logEvent(env, id, actor, 'cancelled', message);
   } else if (action === 'reopen') {
     await env.DB.prepare(
-      "UPDATE applications SET status = 'pending', visit_date = NULL, visit_time = NULL, cancelled_by = NULL, updated_at = ?1 WHERE id = ?2",
+      `UPDATE applications SET status = 'pending', visit_date = NULL, visit_time = NULL, cancelled_by = NULL, updated_at = ?1,
+       confirm_status = '', confirmed_at = NULL, confirmed_by = NULL, attendance = '', attendance_at = NULL WHERE id = ?2`,
     ).bind(now, id).run();
     await logEvent(env, id, actor, 'reopened');
+  } else if (action === 'confirm' || action === 'unconfirm') {
+    if (r.status !== 'approved') throw new HttpError(409, 'Yalnızca onaylanmış ziyaretler teyit edilebilir.');
+    if (action === 'unconfirm') {
+      await env.DB.prepare("UPDATE applications SET confirm_status = '', confirmed_at = NULL, confirmed_by = NULL, updated_at = ?1 WHERE id = ?2")
+        .bind(now, id).run();
+      await logEvent(env, id, actor, 'unconfirmed');
+    } else {
+      const n = body.student_count == null || body.student_count === '' ? r.student_count : Number(body.student_count);
+      if (!Number.isInteger(n) || n < 1 || n > 2000) throw new HttpError(422, 'Geçerli bir öğrenci sayısı yazın.', { fields: { student_count: 'Geçerli bir öğrenci sayısı yazın.' } });
+      await env.DB.prepare("UPDATE applications SET confirm_status = 'confirmed', confirmed_at = ?1, confirmed_by = ?2, student_count = ?3, updated_at = ?1 WHERE id = ?4")
+        .bind(now, actor, n, id).run();
+      await logEvent(env, id, actor, 'confirmed', n === r.student_count ? `${n} öğrenci (panelden)` : `${r.student_count} → ${n} öğrenci (panelden)`);
+    }
+  } else if (action === 'attendance') {
+    const v = ['came', 'no_show', ''].includes(body.attendance) ? body.attendance : null;
+    if (v === null) throw new HttpError(400, 'Geçersiz katılım bilgisi.');
+    if (r.status !== 'approved') throw new HttpError(409, 'Yalnızca onaylanmış ziyaretler işaretlenebilir.');
+    if (r.visit_date > todayTR()) throw new HttpError(409, 'Ziyaret günü gelmeden katılım işaretlenemez.');
+    await env.DB.prepare('UPDATE applications SET attendance = ?1, attendance_at = ?2, updated_at = ?2 WHERE id = ?3')
+      .bind(v, v ? now : null, id).run();
+    await logEvent(env, id, actor, 'attendance', v === 'came' ? 'Geldi' : v === 'no_show' ? 'Gelmedi' : 'Temizlendi');
   } else if (action === 'notes') {
     const sets = [];
     const vals = [];
@@ -566,6 +644,8 @@ async function exportCSV(env) {
     { label: 'Not', get: (r) => r.note },
     { label: 'Öğretmene mesaj', get: (r) => r.admin_message },
     { label: 'İç not', get: (r) => r.internal_note },
+    { label: 'Teyit', get: (r) => (r.confirm_status === 'confirmed' ? `Teyit edildi (${r.confirmed_by})` : '') },
+    { label: 'Katılım', get: (r) => ({ came: 'Geldi', no_show: 'Gelmedi' }[r.attendance] || '') },
     { label: 'Başvuru zamanı', get: (r) => r.created_at },
     { label: 'IP', get: (r) => r.ip || '' },
   ]);
@@ -589,6 +669,8 @@ async function putSettings(request, env) {
   const body = await readJSON(request);
   const { ok, value, errors } = validateSettings(body);
   if (!ok) throw new HttpError(422, 'Lütfen işaretli alanları kontrol edin.', { fields: errors });
+  const combo = settingsComboErrors({ ...(await loadSettings(env)), ...value });
+  if (Object.keys(combo).length) throw new HttpError(422, 'Lütfen işaretli alanları kontrol edin.', { fields: combo });
   const stmts = Object.entries(value).map(([k, v]) =>
     env.DB.prepare('INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .bind(k, JSON.stringify(v)));

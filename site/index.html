@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://itumtal-api.pota-proxy.workers.dev http://127.0.0.1:8787; base-uri 'none'; object-src 'none'; form-action 'self'; script-src 'self' 'sha256-Du+OJKJSbdUgz5nrHeWWINvez6XKDDU/tyj/5c2uvwo=' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com https://maps.google.com https://www.google.com">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>İTÜ Mesleki ve Teknik Anadolu Lisesi · Okul Tanıtım Ziyareti</title>
   <meta name="description" content="Yapay zekâ, siber güvenlik, bilişim ve elektrik-elektronik alanlarında eğitim veren İTÜ Mesleki ve Teknik Anadolu Lisesi'ni Etiler'deki yeni binasında tanıyın; tanıtım ziyareti için başvurun.">
@@ -189,7 +190,7 @@
           <ul class="legend" data-reveal aria-label="Yeni binadaki imkânlar">
             <li><b>22</b><span>Derslik</span></li>
             <li><b>17</b><span>Alan atölyesi ve laboratuvarı</span></li>
-            <li><b>1</b><span>Bilişim teknolojileri sınıfı</span></li>
+            <li><b>8</b><span>Bilişim teknolojileri sınıfı</span></li>
             <li><b class="dot" aria-hidden="true"></b><span>Fizik, kimya ve biyoloji laboratuvarları</span></li>
             <li><b class="dot" aria-hidden="true"></b><span>Proje atölyeleri</span></li>
             <li><b class="dot" aria-hidden="true"></b><span>Kapalı spor salonu</span></li>
@@ -256,6 +257,26 @@
               <svg aria-hidden="true"><use href="assets/icons.svg#navigation"></use></svg>Yol tarifi al
             </a>
           </div>
+        </div>
+
+        <div class="howto" id="nasil-gelirim" data-reveal>
+          <div class="howto__intro">
+            <h3 class="display">Nasıl gelirim?</h3>
+            <p>Okulunuzun adını ya da yola çıkacağınız yeri yazın; toplu taşımayla okula nasıl geleceğinizi Google Haritalar'da gösterelim.</p>
+            <form class="howto__form" id="route-form" novalidate>
+              <label class="visually-hidden" for="route-from">Nereden geleceksiniz?</label>
+              <input class="input" id="route-from" placeholder="Örn. Kağıthane Atatürk Ortaokulu ya da Mecidiyeköy" autocomplete="off">
+              <button class="btn btn--signal" type="submit">Toplu taşımayla rota <svg class="arrow" aria-hidden="true"><use href="assets/icons.svg#arrow-right"></use></svg></button>
+            </form>
+            <p class="error-text" id="route-error" role="alert"></p>
+            <button class="howto__here" type="button" id="route-here"><svg aria-hidden="true"><use href="assets/icons.svg#navigation"></use></svg>Bulunduğum yerden rota çıkar</button>
+            <p class="hint">Rota Google Haritalar'da açılır; hatlar, aktarmalar ve süreler orada günceldir.</p>
+          </div>
+          <ul class="howto__stops" aria-label="Okula en yakın toplu taşıma">
+            <li><span class="howto__badge">M6</span><div><b>Nispetiye metro istasyonu</b><span>En yakın metro durağı · yürüyerek yaklaşık 20 dakika (1,4 km)</span></div></li>
+            <li><span class="howto__badge">M2</span><div><b>Levent aktarması</b><span>M2 Yenikapı–Hacıosman hattından Levent'te M6'ya geçip Nispetiye'de inebilirsiniz.</span></div></li>
+            <li><span class="howto__badge howto__badge--bus">İETT</span><div><b>Karanfilköy ve Anafartalar Okulu durakları</b><span>Okulun yaklaşık 100 metre yakınındaki otobüs durakları</span></div></li>
+          </ul>
         </div>
       </div>
     </section>

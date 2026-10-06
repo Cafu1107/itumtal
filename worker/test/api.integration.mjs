@@ -29,7 +29,7 @@ const step = (name) => console.log('•', name);
 
 const admin = (await call('POST', '/api/auth/login', { username: 'admin', password: ADMIN_PW, turnstile: TS })).data.token;
 assert.ok(admin, 'admin login');
-await call('PUT', '/api/admin/settings', { daily_capacity: 120, booking_open: true, notice: 'Kasım ayı yoğun geçiyor, erken başvurun.', weekdays: [1, 2, 3, 4, 5] }, admin);
+await call('PUT', '/api/admin/settings', { daily_capacity: 120, booking_open: true, notice: 'Kasım ayı yoğun geçiyor, erken başvurun.', weekdays: [1, 2, 3, 4, 5], week_interval: 1, start_date: '' }, admin);
 
 step('config lists open days with remaining seats');
 let cfg = (await call('GET', '/api/config')).data;
@@ -122,6 +122,48 @@ assert.equal(r.data.message, 'Ana girişte buluşalım.');
 assert.equal((await call('POST', `/api/track/${token}/cancel`)).status, 200);
 assert.equal((await call('GET', `/api/track/${token}`)).data.status, 'cancelled');
 assert.equal((await call('GET', '/api/config')).data.days[d1], 120);
+
+step('attendance confirmation: closed until the window, then the teacher confirms');
+r = await call('POST', '/api/applications', { ...base, phone: '0533 000 00 02', student_count: 30, preferred_dates: [d2] });
+assert.equal(r.status, 201, JSON.stringify(r.data));
+const third = { code: r.data.code, token: r.data.token };
+const thirdId = (await call('GET', '/api/admin/applications', undefined, admin)).data.applications.find((a) => a.code === third.code).id;
+await call('PATCH', `/api/admin/applications/${thirdId}`, { action: 'approve', visit_date: d2, visit_time: '10:00' }, admin);
+r = await call('GET', `/api/track/${third.token}`);
+assert.equal(r.data.confirm_open, false, 'far-away visit: window closed');
+assert.equal((await call('POST', `/api/track/${third.token}/confirm`, { student_count: 30 })).status, 409);
+const soon = (await call('GET', '/api/config')).data.today;
+const inTwo = new Date(Date.parse(soon + 'T00:00:00Z') + 2 * 86400000).toISOString().slice(0, 10);
+r = await call('PATCH', `/api/admin/applications/${thirdId}`, { action: 'approve', visit_date: inTwo, visit_time: '10:00', force: true }, admin);
+assert.equal(r.status, 200);
+assert.equal((await call('GET', `/api/track/${third.token}`)).data.confirm_open, true);
+assert.equal((await call('POST', `/api/track/${third.token}/confirm`, { student_count: 31 })).status, 422, 'cannot grow the group');
+r = await call('POST', `/api/track/${third.token}/confirm`, { student_count: 26 });
+assert.equal(r.status, 200, JSON.stringify(r.data));
+assert.equal(r.data.confirm_status, 'confirmed');
+assert.equal(r.data.student_count, 26);
+
+step('attendance can only be marked on or after the visit day');
+assert.equal((await call('PATCH', `/api/admin/applications/${thirdId}`, { action: 'attendance', attendance: 'came' }, admin)).status, 409);
+r = await call('PATCH', `/api/admin/applications/${thirdId}`, { action: 'approve', visit_date: soon, visit_time: '10:00', force: true }, admin);
+assert.equal(r.data.application.confirm_status, '', 'a new date needs a new confirmation');
+r = await call('PATCH', `/api/admin/applications/${thirdId}`, { action: 'attendance', attendance: 'came' }, admin);
+assert.equal(r.data.application.attendance, 'came');
+r = await call('PATCH', `/api/admin/applications/${thirdId}`, { action: 'confirm', student_count: 20 }, admin);
+assert.equal(r.data.application.confirm_status, 'confirmed');
+assert.equal(r.data.application.confirmed_by, 'admin');
+await call('DELETE', `/api/admin/applications/${thirdId}`, undefined, admin);
+
+step('every-other-week rhythm needs a matching start date');
+assert.equal((await call('PUT', '/api/admin/settings', { week_interval: 2, start_date: '' }, admin)).status, 422);
+r = await call('PUT', '/api/admin/settings', { weekdays: [2], week_interval: 2, start_date: '2026-12-02' }, admin);
+assert.equal(r.status, 422, 'Wednesday start with Tuesday visits');
+r = await call('PUT', '/api/admin/settings', { weekdays: [2], week_interval: 2, start_date: '2026-12-01' }, admin);
+assert.equal(r.status, 200);
+cfg = (await call('GET', '/api/config')).data;
+assert.ok(Object.keys(cfg.days).every((d) => d >= '2026-12-01' && new Date(d + 'T00:00:00Z').getUTCDay() === 2));
+assert.ok(!('2026-12-08' in cfg.days), 'off week is closed');
+await call('PUT', '/api/admin/settings', { weekdays: [1, 2, 3, 4, 5], week_interval: 1, start_date: '' }, admin);
 
 step('settings and closed days');
 r = await call('PUT', '/api/admin/settings', { daily_capacity: 0 }, admin);

@@ -1,5 +1,6 @@
 import {
   api, $, esc, icon, fmtDate, fmtDateTime, pill, toast, confirmDialog, setLoading, savedApplications, saveApplication,
+  showFieldErrors,
 } from './common.js';
 import { initHeader } from './site.js';
 
@@ -63,8 +64,13 @@ function timeline(a) {
     steps.push({ cls: 'is-current', ic: 'clock', title: 'Değerlendiriliyor', sub: 'Rehberlik servisimiz sizinle iletişime geçecek.' });
     steps.push({ cls: '', ic: 'calendar', title: 'Ziyaret günü ve saati', sub: 'Görüşmenin ardından burada görünecek.' });
   } else if (a.status === 'approved') {
-    steps.push({ cls: 'is-done', ic: 'check', title: 'Onaylandı', sub: fmtDateTime(a.updated_at) });
-    steps.push({ cls: 'is-current', ic: 'calendar', title: `Ziyaret: ${fmtDate(a.visit_date)}`, sub: `Saat ${a.visit_time}` });
+    steps.push({ cls: 'is-done', ic: 'check', title: 'Onaylandı', sub: '' });
+    if (a.confirm_status === 'confirmed') {
+      steps.push({ cls: 'is-done', ic: 'check', title: 'Katılım teyit edildi', sub: `${a.student_count} öğrenci · ${fmtDateTime(a.confirmed_at)}` });
+    } else {
+      steps.push({ cls: a.confirm_open ? 'is-current' : '', ic: 'users', title: 'Katılım teyidi', sub: a.confirm_open ? 'Lütfen aşağıdan teyit edin.' : `${fmtDate(a.confirm_from, { weekday: false })} tarihinde açılacak.` });
+    }
+    steps.push({ cls: a.confirm_status === 'confirmed' ? 'is-current' : '', ic: 'calendar', title: `Ziyaret: ${fmtDate(a.visit_date)}`, sub: `Saat ${a.visit_time}` });
   } else if (a.status === 'rejected') {
     steps.push({ cls: 'is-bad', ic: 'x', title: 'Kabul edilemedi', sub: fmtDateTime(a.updated_at) });
   } else {
@@ -83,6 +89,26 @@ function render(a) {
       <div>${icon('clock')}${esc(a.visit_time)}</div>
     </div>`;
   }
+  let confirm = '';
+  if (a.status === 'approved' && a.confirm_status === 'confirmed') {
+    confirm = `<div class="confirm confirm--done">${icon('check')}<div><b>Katılımınız teyit edildi.</b><span>${a.student_count} öğrenciyle bekliyoruz. Değişiklik olursa lütfen okulu arayın.</span></div></div>`;
+  } else if (a.status === 'approved' && a.confirm_open) {
+    confirm = `
+      <form class="confirm confirm--ask" id="confirm-form" novalidate>
+        <div class="confirm__head">${icon('users')}<div><b>Katılımınızı teyit edin</b><span>Ziyaret yaklaştı. Geleceğinizi ve kesin öğrenci sayısını bildirir misiniz?</span></div></div>
+        <div class="confirm__row">
+          <div class="field">
+            <label class="label" for="confirm-count">Gelecek öğrenci sayısı</label>
+            <input class="input" id="confirm-count" name="student_count" type="number" inputmode="numeric" min="1" max="${a.student_count}" value="${a.student_count}">
+          </div>
+          <button class="btn btn--ok btn--lg" type="submit">${icon('check')}Geleceğiz, teyit et</button>
+        </div>
+        <p class="error-text" data-error-for="student_count"></p>
+        <p class="hint">Gelemeyecekseniz aşağıdaki "Başvuruyu iptal et" düğmesini kullanın; yeriniz başka okullara açılır.</p>
+      </form>`;
+  } else if (a.status === 'approved' && a.visit_date >= new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10)) {
+    confirm = `<p class="hint" style="font-size:.9375rem">${icon('info', 'inline-icon')} Ziyaretinizden birkaç gün önce, <b>${esc(fmtDate(a.confirm_from, { weekday: false }))}</b> tarihinden itibaren bu sayfadan katılımınızı teyit etmeniz istenecek.</p>`;
+  }
   root.innerHTML = `
     <article class="status-card status-card--${a.status}">
       <div class="status-card__hero">
@@ -90,6 +116,7 @@ function render(a) {
         <h2 class="display" style="font-size:clamp(1.75rem,1.2rem + 2vw,2.5rem)">${TITLES[a.status]}</h2>
         ${lead}
         ${msg}
+        ${confirm}
       </div>
       ${timeline(a)}
       <dl class="details">
@@ -110,6 +137,24 @@ function render(a) {
     <p class="hint">Sorunuz mu var? Okulumuzu <a href="tel:+902122612420">0212 261 24 20</a> numarasından arayabilirsiniz.</p>`;
 
   $('#reload').addEventListener('click', load);
+  $('#confirm-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const n = Number(form.student_count.value);
+    if (!Number.isInteger(n) || n < 1) { showFieldErrors(form, { student_count: 'Gelecek öğrenci sayısını yazın.' })?.focus(); return; }
+    if (n > a.student_count) { showFieldErrors(form, { student_count: `Onaylanan sayı ${a.student_count}. Daha kalabalık gelecekseniz lütfen okulu arayın.` })?.focus(); return; }
+    const btn = form.querySelector('[type=submit]');
+    setLoading(btn, true);
+    try {
+      const res = await api(`/api/track/${encodeURIComponent(token)}/confirm`, { method: 'POST', body: { student_count: n } });
+      toast('Katılımınız teyit edildi. Teşekkürler!');
+      render(res);
+    } catch (err) {
+      setLoading(btn, false);
+      showFieldErrors(form, err.data?.fields || {});
+      toast(err.message, { type: 'bad' });
+    }
+  });
   $('#ics')?.addEventListener('click', () => downloadICS(a));
   $('#cancel')?.addEventListener('click', async (e) => {
     const ok = await confirmDialog({

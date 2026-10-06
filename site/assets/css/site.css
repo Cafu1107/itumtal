@@ -305,6 +305,43 @@
 .contact-card .contact-list { margin-bottom: 24px; }
 @media (max-width: 860px) { .location { grid-template-columns: 1fr; } .map { min-height: 320px; } }
 
+/* how to get here */
+.howto {
+  display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(20px, 4vw, 48px);
+  margin-top: 16px; padding: clamp(24px, 3.5vw, 40px);
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-sm);
+  border-top: 6px solid var(--signal);
+}
+.howto h3 { font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.125rem); line-height: 1.05; }
+.howto__intro > p { margin-top: 10px; color: var(--ink-2); max-width: 52ch; }
+.howto__form { display: flex; gap: 8px; margin-top: 20px; }
+.howto__form .input { flex: 1; min-width: 0; }
+.howto__form .btn { flex: none; }
+.howto .error-text { margin-top: 8px; }
+.howto__here {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; min-height: 44px; padding: 0;
+  border: 0; background: none; color: var(--ink); font-weight: 650; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.howto__here svg { width: 18px; height: 18px; color: var(--brick); }
+.howto__here:disabled { opacity: .5; cursor: progress; }
+.howto .hint { margin-top: 6px; }
+.howto__stops { list-style: none; display: grid; align-content: start; }
+.howto__stops li { display: grid; grid-template-columns: 52px 1fr; gap: 14px; align-items: start; padding: 14px 0; border-top: 1px solid var(--line); }
+.howto__stops li:first-child { border-top: 0; padding-top: 0; }
+.howto__stops b { display: block; font-weight: 700; }
+.howto__stops span:not(.howto__badge) { display: block; margin-top: 2px; color: var(--ink-2); font-size: .9375rem; }
+.howto__badge {
+  display: grid; place-items: center; height: 32px; border-radius: 6px;
+  background: var(--ink); color: #fff; font-weight: 800; font-size: .875rem; letter-spacing: .02em;
+}
+.howto__badge--bus { background: var(--brick); font-size: .75rem; }
+@media (max-width: 860px) {
+  .howto { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .howto__form { flex-direction: column; }
+}
+
 /* ---------- footer ---------- */
 
 .site-footer { background: var(--paper-2); }
@@ -502,6 +539,21 @@
 .saved-list b { display: block; }
 .saved-list small { color: var(--ink-3); }
 @media (hover: hover) { .saved-list a:hover { border-color: var(--ink); } }
+
+/* attendance confirmation */
+.confirm { margin-top: 8px; border-radius: var(--r); }
+.confirm--done { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; background: var(--ok-soft); color: #134d30; }
+.confirm--done > svg { width: 22px; height: 22px; flex: none; margin-top: 1px; }
+.confirm b { display: block; }
+.confirm span { display: block; }
+.confirm--ask { padding: 18px; background: var(--signal-soft); border: 1.5px solid #f2c75c; display: grid; gap: 12px; }
+.confirm__head { display: flex; gap: 12px; align-items: flex-start; }
+.confirm__head > svg { width: 24px; height: 24px; flex: none; color: var(--warn); margin-top: 1px; }
+.confirm__head span { color: var(--ink-2); margin-top: 2px; }
+.confirm__row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.confirm__row .field { flex: 0 1 200px; }
+.confirm .hint { margin: 0; }
+.inline-icon { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; }
 
 /* skeleton */
 .skel { border-radius: var(--r); background: linear-gradient(90deg, var(--paper-2) 0 40%, #f3f0ea 50%, var(--paper-2) 60% 100%); background-size: 300% 100%; animation: skel 1.4s linear infinite; }

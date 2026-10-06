@@ -1,6 +1,6 @@
 import {
   api, $, $$, esc, icon, fmtDate, fmtPhone, MONTHS, DAYS_SHORT, parseISO, toISO, isoWeekday,
-  toast, setLoading, copyText, showFieldErrors, saveApplication, bindTurnstile,
+  toast, setLoading, copyText, showFieldErrors, saveApplication, bindTurnstile, rhythmText, todayTR,
 } from './common.js';
 import { initHeader } from './site.js';
 
@@ -49,6 +49,10 @@ async function boot() {
   if (!cfg.booking_open) {
     notices.insertAdjacentHTML('beforeend', `<div class="callout callout--bad">${icon('ban')}<span><b>Ziyaret başvuruları şu anda kapalı.</b> Bilgi için okulumuzu 0212 261 24 20 numarasından arayabilirsiniz.</span></div>`);
     $$('input, select, textarea, button[type="submit"]', form).forEach((el) => { el.disabled = true; });
+  }
+  if (cfg.booking_open) {
+    const start = cfg.start_date && cfg.start_date > todayTR() ? `, ${fmtDate(cfg.start_date, { year: true, weekday: false })} itibarıyla` : '';
+    notices.insertAdjacentHTML('beforeend', `<div class="callout callout--info">${icon('calendar')}<span><b>Ziyaret günleri:</b> ${esc(rhythmText(cfg))}${esc(start)}. Takvimde yalnızca bu günler seçilebilir.</span></div>`);
   }
   if (cfg.notice) {
     notices.insertAdjacentHTML('beforeend', `<div class="callout">${icon('info')}<span style="white-space:pre-line">${esc(cfg.notice)}</span></div>`);
@@ -344,7 +348,7 @@ function validate(b) {
   if (!b.district) e.district = 'İlçe seçin.';
   if (b.teacher_name.length < 3) e.teacher_name = 'Adınızı ve soyadınızı yazın.';
   if (!/^0[2-5]\d{9}$/.test(phoneDigits(b.phone))) e.phone = 'Geçerli bir telefon numarası yazın (örn. 0532 123 45 67).';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(b.email)) e.email = 'Geçerli bir e-posta adresi yazın.';
+  if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(b.email)) e.email = 'Geçerli bir e-posta adresi yazın (Türkçe karakter olmadan).';
   if (!b.kvkk) e.kvkk = 'Devam etmek için aydınlatma metnini onaylayın.';
   return e;
 }
@@ -428,7 +432,7 @@ function showDone(res, body, link) {
           <input class="input" id="track-link" value="${esc(link)}" readonly>
           <button class="btn" type="button" id="copy-link">${icon('copy')}Kopyala</button>
         </div>
-        <p class="hint">Başvurunuzun durumunu ve onaylanan ziyaret saatini bu bağlantıdan görebilir, gerekirse iptal edebilirsiniz. Bağlantı bu tarayıcıda da saklandı.</p>
+        <p class="hint">Başvurunuzun durumunu ve onaylanan ziyaret saatini bu bağlantıdan görebilir, gerekirse iptal edebilirsiniz. Ziyaretinizden ${state.cfg.confirm_days || 3} gün önce katılımınızı da bu bağlantıdan teyit etmeniz istenecek. Bağlantı bu tarayıcıda da saklandı.</p>
         <div class="done__actions" style="margin-top:8px">
           <a class="btn btn--primary" href="${esc(link)}">Takip sayfasını aç ${icon('arrow-right', 'arrow')}</a>
           <a class="btn" href="./">Ana sayfaya dön</a>
