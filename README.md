@@ -12,6 +12,7 @@
 <p align="center">
   <a href="https://cafu1107.github.io/itumtal/"><img src="https://img.shields.io/badge/Siteyi_aç-cafu1107.github.io%2Fitumtal-f4a300?style=for-the-badge&labelColor=152340" alt="Siteyi aç"></a>
   <a href="https://cafu1107.github.io/itumtal/basvuru.html"><img src="https://img.shields.io/badge/Ziyaret_başvurusu-152340?style=for-the-badge" alt="Ziyaret başvurusu"></a>
+  <a href="https://github.com/Cafu1107/itumtal/releases/latest/download/ITU-MTAL-Tanitim.zip"><img src="https://img.shields.io/badge/İnternetsiz_sürümü_indir-.zip-9a3a24?style=for-the-badge&labelColor=152340" alt="İnternetsiz tanıtım sürümünü indir"></a>
 </p>
 
 <p align="center">
@@ -19,6 +20,7 @@
   <a href="https://github.com/Cafu1107/itumtal/releases/latest"><img src="https://img.shields.io/github/v/release/Cafu1107/itumtal?label=s%C3%BCr%C3%BCm&color=9a3a24" alt="Son sürüm"></a>
   <img src="https://img.shields.io/badge/Cloudflare-Workers_%2B_D1-f38020?logo=cloudflare&logoColor=white" alt="Cloudflare Workers ve D1">
   <img src="https://img.shields.io/badge/HTML_%2F_CSS_%2F_JS-çerçevesiz-152340" alt="Çerçevesiz HTML, CSS ve JavaScript">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/lisans-GPL--3.0-152340" alt="Lisans: GPL-3.0"></a>
 </p>
 
 ---
@@ -73,6 +75,16 @@ Panel adresi: **https://cafu1107.github.io/itumtal/panel/**
 
 </details>
 
+## İnternetsiz tanıtım sürümü
+
+Okul ağlarında `github.io` adresleri kapalı olabilir. Siteyi ve paneli göstermek için internet gerektirmeyen bir sürüm var:
+
+1. **[ITU-MTAL-Tanitim.zip](https://github.com/Cafu1107/itumtal/releases/latest/download/ITU-MTAL-Tanitim.zip)** dosyasını indirip masaüstüne ya da bir USB belleğe çıkarın.
+2. `1-Tanitim-sitesini-ac.html` ya da `2-Rehberlik-panelini-ac.html` dosyasına çift tıklayın (Chrome veya Edge).
+3. Panel girişi: kullanıcı adı **gulnihal**, şifre **tanitim2026**.
+
+Örnek okullar ve başvurular hazır gelir. Formdan başvuru yapılabilir, panelde onaylanabilir, teyit edilebilir ve Excel alınabilir. Yapılanlar yalnızca o bilgisayarın tarayıcısında saklanır, gerçek siteye gitmez. Üstteki **Örnek verilere dön** düğmesi her şeyi başa alır. Bu sürüm, sitenin gerçek API kodunu tarayıcı içindeki bir SQLite veritabanında çalıştırır; kurallar canlı siteyle aynıdır.
+
 ## Sık sorulanlar
 
 <details>
@@ -116,6 +128,7 @@ Yönetici hesabıyla giriş yapan biri *Ayarlar → Hesaplar* bölümünden yeni
 | `site/` | Statik site: HTML, CSS, çerçevesiz JavaScript (ES modülleri). GitHub Pages'e olduğu gibi yayınlanır. |
 | `worker/` | Cloudflare Worker + D1 (SQLite) API'si. `src/lib.mjs` saf mantık, `src/index.mjs` uç noktalar, `migrations/` şema. |
 | `scripts/` | `images.py` (fotoğrafları kırpar, WebP üretir), `seed-user.mjs` (panel hesabı oluşturur / şifre sıfırlar), `yerel-test.cmd` (yerel test ortamı). |
+| `offline/` | İnternetsiz tanıtım sürümü: `shim.js` Worker'ı tarayıcıda sql.js üzerinde çalıştırır, `build.mjs` paketi üretir (`cd offline && npm install && npm run build`). |
 
 **Yerelde çalıştırma**
 
@@ -155,6 +168,8 @@ ADMIN_PASSWORD=... STAFF_PASSWORD=... node test/api.integration.mjs  # yerel API
 
 </details>
 
-## Kaynaklar ve haklar
+## Lisans
 
-Okulla ilgili bilgiler İstanbul İl Millî Eğitim Müdürlüğü'nün 23.07.2026 tarihli duyurusundan, toplu taşıma bilgileri OpenStreetMap'ten alınmıştır. Okul logosu ve fotoğraflar okula aittir ve okulun izniyle kullanılmaktadır.
+Kod [GNU GPL v3.0](LICENSE) ile lisanslanmıştır: kullanabilir, değiştirebilir ve paylaşabilirsiniz; değiştirilmiş sürümleri yayınlarsanız kaynak kodunu da aynı lisansla açmanız gerekir.
+
+Okul logosu ve fotoğraflar okula aittir, okulun izniyle kullanılmaktadır ve bu lisansın kapsamında değildir. Okulla ilgili bilgiler İstanbul İl Millî Eğitim Müdürlüğü'nün 23.07.2026 tarihli duyurusundan, harita ve toplu taşıma bilgileri OpenStreetMap'ten (© OpenStreetMap katkıda bulunanlar) alınmıştır. Archivo yazı tipi SIL Open Font License ile, sql.js ve ExcelJS MIT lisansıyla dağıtılır.

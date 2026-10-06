@@ -6,3 +6,6 @@ raw/
 *.log
 .DS_Store
 Thumbs.db
+offline/node_modules/
+offline/dist/
+offline/.cache/

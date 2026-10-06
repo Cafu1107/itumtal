@@ -1,0 +1,14 @@
+{
+  "name": "itumtal-offline",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "description": "Builds the offline (no-internet) demo of the İTÜ MTAL visit booking site.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "sql.js": "^1.14.2"
+  }
+}

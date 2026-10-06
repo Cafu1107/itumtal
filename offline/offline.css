@@ -1,0 +1,17 @@
+/* Offline demo only: the info bar and the static map that replaces the Google Maps frame. */
+.offline-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 14px;
+  padding: 8px 16px; background: #f4a300; color: #152340;
+  font: 500 14px/1.35 Archivo, system-ui, sans-serif; text-align: center;
+}
+.offline-bar button {
+  border: 1.5px solid #152340; border-radius: 999px; background: transparent; color: inherit;
+  padding: 3px 12px; font: 650 13px Archivo, system-ui, sans-serif; cursor: pointer;
+}
+.offline-bar button:hover { background: rgb(21 35 64 / .1); }
+.map .map__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Panel on desktop: keep the bar on top and fit the sticky sidebar under it. */
+@media (min-width: 901px) {
+  body.panel .offline-bar { position: sticky; top: 0; z-index: 40; min-height: 38px; flex-wrap: nowrap; }
+  body.panel .sidebar { top: 38px; height: calc(100svh - 38px); }
+}

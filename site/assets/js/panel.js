@@ -2,7 +2,7 @@
 import {
   api, $, $$, esc, icon, asset, fmtDate, fmtDateTime, relTime, fmtPhone, pill, STATUS, MONTHS, DAYS_SHORT,
   parseISO, toISO, isoWeekday, addDays, todayTR, toast, confirmDialog, setLoading, copyText, showFieldErrors,
-  bindTurnstile, isVisitDay, rhythmText, nextVisitDays, daysBetween,
+  bindTurnstile, isVisitDay, rhythmText, nextVisitDays, daysBetween, OFFLINE, PUBLIC_SITE, OFFLINE_DEMO,
 } from './common.js';
 
 const TOKEN_KEY = 'itumtal.panel.token';
@@ -73,6 +73,7 @@ function renderLogin(message = '') {
           <img src="${asset('assets/img/logo.webp')}" alt="İTÜ MTAL logosu">
           <h1>Panele giriş</h1>
           <p>Ziyaret başvurularını yönetmek için giriş yapın.</p>
+          ${OFFLINE ? `<div class="callout callout--info" style="margin-top:20px">${icon('info')}<span><b>Çevrimdışı tanıtım sürümü.</b> Kullanıcı adı <b>${OFFLINE_DEMO.user}</b>, şifre <b>${OFFLINE_DEMO.password}</b>. Veriler yalnızca bu bilgisayarda saklanır.</span></div>` : ''}
           <form id="login" novalidate>
             <div class="callout callout--bad" id="login-error" role="alert" ${message ? '' : 'hidden'}>${icon('alert')}<span>${esc(message)}</span></div>
             <div class="field">
@@ -452,12 +453,14 @@ function waLink(a) {
   if (!/^05\d{9}$/.test(a.phone)) return null;
   const who = S.user.display_name;
   const text = a.status === 'approved'
-    ? `Merhaba ${a.teacher_name} Hocam, İTÜ Mesleki ve Teknik Anadolu Lisesi rehberlik servisinden ${who}. ${a.school_name} için tanıtım ziyaretiniz ${fmtDate(a.visit_date)} saat ${a.visit_time} olarak planlandı. Ayrıntıları buradan görebilirsiniz: ${trackLink(a)}`
+    ? `Merhaba ${a.teacher_name} Hocam, İTÜ Mesleki ve Teknik Anadolu Lisesi rehberlik servisinden ${who}. ${a.school_name} için tanıtım ziyaretiniz ${fmtDate(a.visit_date)} saat ${a.visit_time} olarak planlandı. Ayrıntıları buradan görebilirsiniz: ${messageLink(a)}`
     : `Merhaba ${a.teacher_name} Hocam, İTÜ Mesleki ve Teknik Anadolu Lisesi rehberlik servisinden ${who}. ${a.school_name} için yaptığınız tanıtım ziyareti başvurusu (${a.code}) hakkında yazıyorum.`;
   return `https://wa.me/9${a.phone}?text=${encodeURIComponent(text)}`;
 }
 
-const SITE = () => new URL('../', location.href).href;
+const SITE = () => (OFFLINE ? PUBLIC_SITE : new URL('../', location.href).href);
+/** Link written into messages: the real public address even in the offline demo. */
+const messageLink = (a) => (OFFLINE ? `${PUBLIC_SITE}takip.html?t=${a.token}` : trackLink(a));
 // Rows saved before the stricter API check could still hold odd addresses; never put those in a mailto: link.
 const safeEmail = (e) => /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(String(e || ''));
 const SCHOOL_ADDRESS = 'Akat Mah. Zeytinoğlu Cad. No:80, Etiler, Beşiktaş / İstanbul';
@@ -475,11 +478,11 @@ function messageTemplates(a) {
   const T = {
     approve: {
       label: 'Onay', subject: 'İTÜ MTAL tanıtım ziyaretiniz onaylandı',
-      text: `${hi}\n\n${a.school_name} için yaptığınız okul tanıtım ziyareti başvurusu onaylandı. Sizi ve öğrencilerinizi okulumuzda ağırlamaktan mutluluk duyacağız.\n\n${when}\nÖğrenci sayısı: ${a.student_count}\nAdres: ${SCHOOL_ADDRESS}\n${note('Not')}\nZiyaretinizden ${S.settings.confirm_days} gün önce, ${a.visit_date ? fmtDate(addDays(a.visit_date, -S.settings.confirm_days), { weekday: false }) : ''} tarihinden itibaren aşağıdaki bağlantıdan katılımınızı ve kesin öğrenci sayısını teyit etmenizi rica ederiz:\n${trackLink(a)}\n\nToplu taşımayla ulaşım: ${SITE()}#nasil-gelirim\n\nGörüşmek üzere,\n${signature()}`,
+      text: `${hi}\n\n${a.school_name} için yaptığınız okul tanıtım ziyareti başvurusu onaylandı. Sizi ve öğrencilerinizi okulumuzda ağırlamaktan mutluluk duyacağız.\n\n${when}\nÖğrenci sayısı: ${a.student_count}\nAdres: ${SCHOOL_ADDRESS}\n${note('Not')}\nZiyaretinizden ${S.settings.confirm_days} gün önce, ${a.visit_date ? fmtDate(addDays(a.visit_date, -S.settings.confirm_days), { weekday: false }) : ''} tarihinden itibaren aşağıdaki bağlantıdan katılımınızı ve kesin öğrenci sayısını teyit etmenizi rica ederiz:\n${messageLink(a)}\n\nToplu taşımayla ulaşım: ${SITE()}#nasil-gelirim\n\nGörüşmek üzere,\n${signature()}`,
     },
     reminder: {
       label: 'Teyit hatırlatma', subject: 'İTÜ MTAL tanıtım ziyareti: katılım teyidi',
-      text: `${hi}\n\n${a.school_name} olarak okulumuza yapacağınız tanıtım ziyareti yaklaşıyor.\n\n${when}\n\nKatılımınızı ve gelecek öğrenci sayısını aşağıdaki bağlantıdan teyit edebilir misiniz? Gelemeyecekseniz aynı bağlantıdan iptal edebilirsiniz; böylece yeriniz başka okullara açılır.\n${trackLink(a)}\n\nTeşekkürler,\n${signature()}`,
+      text: `${hi}\n\n${a.school_name} olarak okulumuza yapacağınız tanıtım ziyareti yaklaşıyor.\n\n${when}\n\nKatılımınızı ve gelecek öğrenci sayısını aşağıdaki bağlantıdan teyit edebilir misiniz? Gelemeyecekseniz aynı bağlantıdan iptal edebilirsiniz; böylece yeriniz başka okullara açılır.\n${messageLink(a)}\n\nTeşekkürler,\n${signature()}`,
     },
     reject: {
       label: 'Red', subject: 'İTÜ MTAL tanıtım ziyareti başvurunuz hakkında',
@@ -1249,9 +1252,13 @@ let excelReady;
 function loadExcelJS() {
   excelReady ||= new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
-    s.integrity = 'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz';
-    s.crossOrigin = 'anonymous';
+    if (OFFLINE) {
+      s.src = asset('assets/offline/exceljs.min.js'); // bundled copy, no network
+    } else {
+      s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+      s.integrity = 'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz';
+      s.crossOrigin = 'anonymous';
+    }
     s.onload = () => resolve(window.ExcelJS);
     s.onerror = () => { excelReady = null; reject(new Error('Excel aracı yüklenemedi. İnternet bağlantınızı kontrol edin.')); };
     document.head.append(s);

@@ -1,6 +1,7 @@
 {
   "name": "itumtal-api",
   "private": true,
+  "license": "GPL-3.0-only",
   "description": "Cloudflare Worker + D1 behind the İTÜ MTAL visit booking site.",
   "type": "module",
   "scripts": {

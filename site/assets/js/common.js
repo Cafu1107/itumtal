@@ -1,12 +1,19 @@
 // Shared helpers for every page (ES module).
 
+// true only in the offline demo build (offline/build.mjs passes --define:__OFFLINE__=true).
+export const OFFLINE = typeof __OFFLINE__ !== 'undefined' && __OFFLINE__ === true;
 const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
-export const API_BASE = LOCAL ? 'http://127.0.0.1:8787' : 'https://itumtal-api.pota-proxy.workers.dev';
+export const API_BASE = OFFLINE ? 'https://offline.itumtal.invalid'
+  : LOCAL ? 'http://127.0.0.1:8787' : 'https://itumtal-api.pota-proxy.workers.dev';
 // Cloudflare Turnstile site key (public). Locally: Cloudflare's always-pass test key. Empty = no check.
-export const TURNSTILE_SITEKEY = LOCAL ? '1x00000000000000000000AA' : '';
+export const TURNSTILE_SITEKEY = OFFLINE ? '' : LOCAL ? '1x00000000000000000000AA' : '';
+/** The public address, used in ready-made messages (also in the offline demo). */
+export const PUBLIC_SITE = 'https://cafu1107.github.io/itumtal/';
+/** Accounts of the offline demo (data lives only in that browser). */
+export const OFFLINE_DEMO = { user: 'gulnihal', admin: 'admin', password: 'tanitim2026' };
 
-/** Resolves a path against the site root, so pages in sub-folders (panel/) find assets. */
-const ROOT = new URL('../../', import.meta.url);
+/** Site root: pages live at the root or in panel/. */
+const ROOT = new URL(location.pathname.includes('/panel/') ? '../' : './', location.href);
 export const asset = (p) => new URL(p, ROOT).href;
 
 export class ApiError extends Error {
@@ -44,7 +51,9 @@ export function esc(s) {
 }
 
 export function icon(name, cls = '') {
-  return `<svg class="${cls}" aria-hidden="true" focusable="false"><use href="${asset('assets/icons.svg')}#${name}"></use></svg>`;
+  // The offline build inlines the sprite into every page (file:// can't reference another file's SVG),
+  // with an "i-" prefix so symbol ids can't collide with page ids like #list or #users.
+  return `<svg class="${cls}" aria-hidden="true" focusable="false"><use href="${OFFLINE ? '#i-' : `${asset('assets/icons.svg')}#`}${name}"></use></svg>`;
 }
 
 // ---------- dates (all dates are Istanbul calendar days) ----------
